@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Цифровой поводырь - Устройства</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="devices">
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>Цифровой поводырь</h1>
+      <p>Состояние device-слоя и инструменты симуляции.</p>
+      <nav class="nav">
+        <a href="/dashboard" data-page="dashboard">Панель</a>
+        <a href="/devices" data-page="devices">Устройства</a>
+        <a href="/route-builder" data-page="route_builder">Маршруты</a>
+        <a href="/transport" data-page="transport">Транспорт</a>
+        <a href="/mfc" data-page="mfc">МФЦ</a>
+        <a href="/logs" data-page="logs">Логи</a>
+      </nav>
+    </aside>
+    <main class="content">
+      <section class="hero">
+        <div>
+          <h2 data-hero-title></h2>
+          <p data-hero-subtitle></p>
+        </div>
+      </section>
+      <div class="grid">
+        <section class="card col-12">
+          <h3>Heartbeat устройств</h3>
+          <div class="table-wrap">
+            <table class="table" id="device-table"></table>
+          </div>
+        </section>
+        <section class="card col-6">
+          <h3>Симуляция подтверждения</h3>
+          <form data-action="simulate-face">
+            <label>ID устройства<input name="device_id" value="np1-01"></label>
+            <label>ID пользователя<input name="user_id" value="user_demo"></label>
+            <button type="submit">Подтвердить пользователя</button>
+          </form>
+        </section>
+        <section class="card col-6">
+          <h3>Симуляция виброплатформы</h3>
+          <form data-action="simulate-distance">
+            <label>ID устройства<input name="device_id" value="vibro-01"></label>
+            <label>Расстояние, см<input name="distance_cm" type="number" value="90"></label>
+            <button type="submit">Отправить расстояние</button>
+          </form>
+        </section>
+        <section class="card col-12">
+          <h3>Результат симуляции</h3>
+          <pre id="simulation-result"></pre>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

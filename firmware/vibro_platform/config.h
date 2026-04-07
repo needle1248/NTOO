@@ -1,0 +1,16 @@
+#pragma once
+
+#define WIFI_SSID "NTO_MGBOT_CITY"
+#define WIFI_PASS "CHANGE_ME"
+
+#define LOCAL_SERVER_BASE "http://192.168.31.63:8080"
+#define DEVICE_ID "vibro-01"
+#define DEVICE_KIND "vibro_platform"
+#define HEARTBEAT_INTERVAL_MS 5000
+#define COMMAND_POLL_INTERVAL_MS 800
+#define SENSOR_INTERVAL_MS 300
+
+#define VIBRO_PIN 26
+#define DISTANCE_PIN 34
+#define DETECT_THRESHOLD_CM 120.0
+

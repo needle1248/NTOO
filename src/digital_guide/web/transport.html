@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Цифровой поводырь - Транспорт</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="transport">
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>Цифровой поводырь</h1>
+      <p>Транспортный сценарий и симуляция препятствий.</p>
+      <nav class="nav">
+        <a href="/dashboard" data-page="dashboard">Панель</a>
+        <a href="/devices" data-page="devices">Устройства</a>
+        <a href="/route-builder" data-page="route_builder">Маршруты</a>
+        <a href="/transport" data-page="transport">Транспорт</a>
+        <a href="/mfc" data-page="mfc">МФЦ</a>
+        <a href="/logs" data-page="logs">Логи</a>
+      </nav>
+    </aside>
+    <main class="content">
+      <section class="hero">
+        <div>
+          <h2 data-hero-title></h2>
+          <p data-hero-subtitle></p>
+        </div>
+      </section>
+      <div class="grid">
+        <section class="card col-6">
+          <h3>Запустить транспортный сценарий</h3>
+          <form data-action="start-scenario">
+            <input type="hidden" name="scenario_kind" value="transport">
+            <label>ID пользователя<input name="user_id" value="user_demo"></label>
+            <label>Стартовая точка<input name="start_node" type="number" value="1"></label>
+            <label>Целевая точка<input name="goal_node" type="number" value="29"></label>
+            <label>Промежуточные точки<input name="via_nodes" value="16,17,18"></label>
+            <label>ID автобуса<input name="bus_id" value="left_ring-bus-1"></label>
+            <label>Подпись назначения<input name="destination_label" value="Пересадка на правое кольцо"></label>
+            <button type="submit">Старт сценария</button>
+          </form>
+        </section>
+        <section class="card col-6">
+          <h3>Симуляция препятствия</h3>
+          <form data-action="simulate-obstacle">
+            <label>ID точки<input name="location_id" type="number" value="16"></label>
+            <label>Сообщение<input name="message" value="Препятствие на пути пересадки"></label>
+            <button type="submit">Добавить препятствие</button>
+          </form>
+        </section>
+        <section class="card col-12">
+          <h3>Таблица автобусов</h3>
+          <div class="table-wrap">
+            <table class="table" id="bus-table"></table>
+          </div>
+        </section>
+        <section class="card col-12">
+          <h3>Результат сценария</h3>
+          <pre id="scenario-result"></pre>
+        </section>
+        <section class="card col-12">
+          <h3>Результат симуляции</h3>
+          <pre id="simulation-result"></pre>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

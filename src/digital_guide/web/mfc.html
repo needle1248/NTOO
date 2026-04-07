@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Цифровой поводырь - МФЦ</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="mfc">
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>Цифровой поводырь</h1>
+      <p>Indoor-сценарий световой навигации по услугам МФЦ.</p>
+      <nav class="nav">
+        <a href="/dashboard" data-page="dashboard">Панель</a>
+        <a href="/devices" data-page="devices">Устройства</a>
+        <a href="/route-builder" data-page="route_builder">Маршруты</a>
+        <a href="/transport" data-page="transport">Транспорт</a>
+        <a href="/mfc" data-page="mfc">МФЦ</a>
+        <a href="/logs" data-page="logs">Логи</a>
+      </nav>
+    </aside>
+    <main class="content">
+      <section class="hero">
+        <div>
+          <h2 data-hero-title></h2>
+          <p data-hero-subtitle></p>
+        </div>
+      </section>
+      <div class="grid">
+        <section class="card col-5">
+          <h3>Запустить сценарий МФЦ</h3>
+          <form data-action="start-scenario">
+            <input type="hidden" name="scenario_kind" value="mfc">
+            <label>ID пользователя<input name="user_id" value="user_demo"></label>
+            <label>Стартовая точка<input name="start_node" type="number" value="20"></label>
+            <label>Целевая точка<input name="goal_node" type="number" value=""></label>
+            <label>Услуга МФЦ<select name="mfc_service_id"><option value="passport">Замена паспорта</option><option value="housing">Справка о жилье</option><option value="benefits">Оформление льгот</option></select></label>
+            <label>Подпись назначения<input name="destination_label" value="Окно обслуживания МФЦ"></label>
+            <label>Промежуточные точки<input name="via_nodes" value=""></label>
+            <button type="submit">Запустить маршрут</button>
+          </form>
+        </section>
+        <section class="card col-7">
+          <h3>Результат indoor-сценария</h3>
+          <pre id="scenario-result"></pre>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+team_id: team-01
+team_name: Digital Guide
+primary_ring: left_ring
+user_id: user_demo
+selected_confirmation_mode: face
+face_threshold: 0.85
+primary_signal_profile: default_type1
+auth:
+  city_access_token: "<GET_FROM_ORGANIZERS>"
+  local_ui_token: "<LOCAL_TOKEN>"
+city:
+  enabled: false
+  base_url: "http://192.168.31.63:8000"
+  state_url: "http://192.168.31.63:8000/debug/state"
+  event_path: "/event"
+  access_token: "<GET_FROM_ORGANIZERS>"
+  poll_interval_seconds: 2.0
+  timeout_seconds: 3.0
+congestion:
+  eta_growth_ratio_threshold: 1.35
+  lap_delta_seconds_threshold: 40.0
+  min_baseline_seconds: 90.0
+recommendation:
+  cold_threshold_c: 5.0
+  hot_threshold_c: 24.0
+  high_humidity_threshold: 80.0
+  low_pressure_threshold_hpa: 745.0
+simulation:
+  enabled: true
+  auto_bus_updates: false
+  auto_point_confirmation: false
+  loop_interval_seconds: 1.0
+deepseek:
+  enabled: false
+  base_url: "https://api.deepseek.com"
+  api_key: ""
+  model: "deepseek-reasoner"
+  timeout_seconds: 30.0
+ring_stop_order:
+  left_ring: [9, 10, 13, 16, 12, 11, 15, 14]
+  right_ring: [29, 30, 31, 32]
+team_point_mapping:
+  team_1: [1, 2, 3, 4, 5, 6, 7, 8]
+  team_2: [1, 2, 3, 4, 5, 6, 7, 8]
+  team_3: [21, 22, 23, 24, 25, 26, 27, 28]
+  team_4: [21, 22, 23, 24, 25, 26, 27, 28]
+  team_5: [1, 8, 7, 6, 5, 4, 3, 2]
+  team_6: [1, 8, 7, 6, 5, 4, 3, 2]
+  team_7: [21, 28, 27, 26, 25, 24, 23, 22]
+  team_8: [21, 28, 27, 26, 25, 24, 23, 22]

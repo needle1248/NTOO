@@ -1,0 +1,13 @@
+{
+  "devices": [
+    {"device_id": "np1-01", "logical_role": "left_nav_1", "device_kind": "nav_point_type1", "location_id": 1, "active": true, "ip_address": "192.168.31.101"},
+    {"device_id": "np1-02", "logical_role": "left_nav_2", "device_kind": "nav_point_type1", "location_id": 3, "active": true, "ip_address": "192.168.31.102"},
+    {"device_id": "np1-03", "logical_role": "right_nav_1", "device_kind": "nav_point_type1", "location_id": 21, "active": true, "ip_address": "192.168.31.103"},
+    {"device_id": "np1-04", "logical_role": "right_nav_2", "device_kind": "nav_point_type1", "location_id": 25, "active": true, "ip_address": "192.168.31.104"},
+    {"device_id": "np2-01", "logical_role": "mfc_light", "device_kind": "nav_point_type2", "location_id": 33, "active": true, "ip_address": "192.168.31.105"},
+    {"device_id": "vibro-01", "logical_role": "crossing_vibro", "device_kind": "vibro_platform", "location_id": 19, "active": true, "ip_address": "192.168.31.106"},
+    {"device_id": "weather-01", "logical_role": "weather_sensor", "device_kind": "weather_sensor", "location_id": 17, "active": true, "ip_address": "192.168.31.107"},
+    {"device_id": "cam-01", "logical_role": "face_gate", "device_kind": "camera", "location_id": 16, "active": true, "ip_address": "192.168.31.108"}
+  ]
+}
+
