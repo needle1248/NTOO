@@ -57,6 +57,16 @@ function setHero(pageId) {
   });
 }
 
+function setTeamBranding(pageId, team) {
+  const teamName = team?.team_name || "Malevin's Kids";
+  document.querySelectorAll("[data-team-name]").forEach(node => {
+    node.textContent = `Команда: ${teamName}`;
+  });
+
+  const hero = pages[pageId] || pages.dashboard;
+  document.title = `${teamName} | ${hero.title}`;
+}
+
 function renderJson(id, payload) {
   const el = document.getElementById(id);
   if (el) {
@@ -157,6 +167,8 @@ function routeFormHasRequiredFields(form) {
 async function refreshState() {
   const compact = window.innerWidth <= 640;
   const state = await fetchJson("/api/state");
+  const pageId = document.body.dataset.page || "dashboard";
+  setTeamBranding(pageId, state.team);
   renderJson("state-json", state);
   renderTable(
     "device-table",

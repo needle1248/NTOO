@@ -104,6 +104,7 @@ def create_app() -> FastAPI:
         store.flush()
 
     app = FastAPI(title="Цифровой поводырь", version="0.1.0", lifespan=lifespan)
+    app.title = f"{runtime.team_config.team_name} | Digital Guide"
     app.include_router(router)
     web_dir = Path(__file__).resolve().parent / "web"
     app.mount("/static", StaticFiles(directory=str(web_dir / "static")), name="static")

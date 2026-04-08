@@ -18,12 +18,24 @@ class CityEventSender:
         self.failure_streak = 0
         self.next_retry_at: datetime | None = None
         self.offline_logged = False
+        self.read_only_logged = False
 
     async def run(self) -> None:
         if not self.city_config.enabled:
             if not self.offline_logged:
                 self.logger.info("city integration disabled, outgoing events will stay local")
                 self.offline_logged = True
+            return
+        if not self.city_config.allow_outbound_events:
+            if not self.read_only_logged:
+                self.logger.info("city outbound events disabled, running in read-only mode")
+                self.read_only_logged = True
+            while True:
+                if self.store.pending_city_events:
+                    dropped = self.store.pending_city_events.popleft()
+                    self.logger.info("city event dropped in read-only mode", extra={"payload": dropped})
+                else:
+                    await asyncio.sleep(0.2)
             return
         while True:
             if not self.store.pending_city_events:
@@ -58,6 +70,9 @@ class CityEventSender:
     async def send(self, payload: dict) -> None:
         if not self.city_config.enabled:
             self.logger.info("city integration disabled, event not sent", extra={"payload": payload})
+            return
+        if not self.city_config.allow_outbound_events:
+            self.logger.info("city outbound disabled, event not sent", extra={"payload": payload})
             return
         headers = {"X-Access-Token": self.city_config.access_token}
         url = f"{self.city_config.base_url.rstrip('/')}{self.city_config.event_path}"

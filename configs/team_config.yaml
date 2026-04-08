@@ -1,5 +1,5 @@
 team_id: team-01
-team_name: Digital Guide
+team_name: "Malevin's Kids"
 primary_ring: left_ring
 user_id: user_demo
 selected_confirmation_mode: face
@@ -9,13 +9,36 @@ auth:
   city_access_token: "<GET_FROM_ORGANIZERS>"
   local_ui_token: "<LOCAL_TOKEN>"
 city:
-  enabled: false
+  enabled: true
+  allow_outbound_events: false
   base_url: "http://192.168.31.63:8000"
   state_url: "http://192.168.31.63:8000/debug/state"
   event_path: "/event"
-  access_token: "<GET_FROM_ORGANIZERS>"
+  access_token: ""
   poll_interval_seconds: 2.0
   timeout_seconds: 3.0
+  bus_ring_mapping:
+    "1": left_ring
+    "2": right_ring
+  stop_index_mapping:
+    left_ring:
+      "1": 9
+      "2": 10
+      "3": 13
+      "4": 16
+      "5": 12
+      "6": 11
+      "7": 15
+      "8": 14
+    right_ring:
+      "1": 29
+      "2": 30
+      "3": 31
+      "4": 32
+      "5": 29
+      "6": 30
+      "7": 31
+      "8": 32
 congestion:
   eta_growth_ratio_threshold: 1.35
   lap_delta_seconds_threshold: 40.0

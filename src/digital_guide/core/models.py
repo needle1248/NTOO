@@ -276,12 +276,15 @@ class ScenarioState(BaseModel):
 
 class CityConfig(BaseModel):
     enabled: bool = True
+    allow_outbound_events: bool = True
     base_url: str
     state_url: str
     event_path: str = "/event"
     access_token: str
     poll_interval_seconds: float = 2.0
     timeout_seconds: float = 3.0
+    bus_ring_mapping: dict[str, str] = Field(default_factory=dict)
+    stop_index_mapping: dict[str, dict[str, int]] = Field(default_factory=dict)
 
 
 class CongestionConfig(BaseModel):

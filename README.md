@@ -90,7 +90,7 @@ curl.exe http://127.0.0.1:8080/health
 Ожидаемый ответ:
 
 ```json
-{"status":"ok","team_id":"team-01"}
+{"status":"ok","team_id":"team-01","team_name":"Malevin's Kids","server_name":"Malevin's Kids"}
 ```
 
 Проверка тестов:
@@ -250,10 +250,37 @@ city:
 ```yaml
 city:
   enabled: true
+  allow_outbound_events: true
   base_url: "http://<CITY_HOST>:<PORT>"
   state_url: "http://<CITY_HOST>:<PORT>/debug/state"
   access_token: "<TOKEN_FROM_ORGANIZERS>"
 ```
+
+### Режим подключения только на чтение
+
+Если нужно подключить локальный сервер к городскому, но не отправлять в него никакие сигналы и события, используйте:
+
+```yaml
+city:
+  enabled: true
+  allow_outbound_events: false
+  base_url: "http://192.168.31.63:8000"
+  state_url: "http://192.168.31.63:8000/debug/state"
+  event_path: "/event"
+  access_token: ""
+  bus_ring_mapping:
+    "1": left_ring
+    "2": right_ring
+```
+
+`bus_ring_mapping` задаёт явное соответствие `bus_id -> ring_id` для городского `debug/state`. Если городской сервер отдаёт автобус `2` и номер позиции остановки внутри кольца, сервер сначала возьмёт кольцо из этого маппинга, а уже потом переведёт позицию в вашу внутреннюю остановку графа.
+
+В этом режиме:
+
+- `debug/state` читается
+- городские автобусы, ETA и погодные данные могут подтягиваться
+- ни один `POST /event` в городской сервер не уходит
+- события `TYPE 1..6` локально обрабатываются, но наружу не отправляются
 
 ## 8. Архитектура системы
 

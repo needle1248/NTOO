@@ -26,6 +26,7 @@ def _public_team_state(request: Request) -> dict:
     return {
         "team_id": team.team_id,
         "team_name": team.team_name,
+        "server_name": team.team_name,
         "primary_ring": team.primary_ring,
         "user_id": team.user_id,
         "selected_confirmation_mode": team.selected_confirmation_mode.value,
@@ -36,11 +37,14 @@ def _public_team_state(request: Request) -> dict:
         "team_point_mapping": team.team_point_mapping,
         "city": {
             "enabled": team.city.enabled,
+            "allow_outbound_events": team.city.allow_outbound_events,
             "base_url": team.city.base_url,
             "state_url": team.city.state_url,
             "event_path": team.city.event_path,
             "poll_interval_seconds": team.city.poll_interval_seconds,
             "timeout_seconds": team.city.timeout_seconds,
+            "bus_ring_mapping": team.city.bus_ring_mapping,
+            "stop_index_mapping": team.city.stop_index_mapping,
         },
         "deepseek": {
             "enabled": team.deepseek.enabled,
@@ -93,7 +97,8 @@ async def logs_page() -> FileResponse:
 
 @router.get("/health")
 async def health(request: Request) -> dict:
-    return {"status": "ok", "team_id": request.app.state.store.team_config.team_id}
+    team = request.app.state.store.team_config
+    return {"status": "ok", "team_id": team.team_id, "team_name": team.team_name, "server_name": team.team_name}
 
 
 @router.get("/api/state")
