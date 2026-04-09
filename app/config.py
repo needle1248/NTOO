@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     team_config_path: str = "config/team.json"
     reference_data_path: str = "config/reference-data.json"
 
+    tts_enabled: bool = True
+    tts_model_path: str = "models/piper/ru_RU-irina-medium.onnx"
+    tts_cache_dir: str = ".cache/tts"
+    tts_voice_name: str = "ru_RU-irina-medium"
+    tts_length_scale: float = 1.08
+    tts_noise_scale: float = 0.7
+    tts_noise_w_scale: float = 0.8
+    tts_volume: float = 0.92
+    tts_sentence_pause_seconds: float = 0.16
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -83,4 +93,3 @@ def load_team_profile(settings: Settings) -> dict[str, Any]:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

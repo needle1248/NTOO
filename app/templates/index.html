@@ -96,6 +96,82 @@
         </article>
       </section>
 
+      <section class="card route-card">
+        <div class="section-head">
+          <h2>Навигация по схеме</h2>
+          <p>
+            Маршрут строится по схеме микрорайона с типами связей: пешая,
+            автобусная и пешеходный переход. Подтверждение прохождения идёт
+            через TYPE 4 или TYPE 6.
+          </p>
+        </div>
+
+        <form class="form" id="navigationForm">
+          <div class="grid-2">
+            <div>
+              <h3>Текущая стартовая точка</h3>
+              <select id="navigationStartPoint" name="start_point_id" required></select>
+            </div>
+            <div>
+              <h3>Точка назначения</h3>
+              <select id="navigationDestination" name="destination_point_id" required></select>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div>
+              <h3>Промежуточные точки</h3>
+              <input
+                id="navigationWaypoints"
+                name="waypoint_point_ids"
+                placeholder="Например: point-10, point-18"
+              />
+            </div>
+            <div>
+              <h3>Услуга МФЦ</h3>
+              <select id="navigationService" name="service_id"></select>
+            </div>
+          </div>
+          <p class="muted">
+            Для сценариев с несколькими этапами можно указать любое число промежуточных точек через запятую.
+            Если выбрана услуга МФЦ, сервер построит маршрут до связанной с ней точки обслуживания.
+          </p>
+          <div class="route-actions">
+            <button type="submit">Построить маршрут</button>
+            <button type="button" class="action-btn secondary-btn" id="toggleRouteSpeech">
+              Озвучка маршрута: вкл
+            </button>
+            <button type="button" class="action-btn secondary-btn" id="repeatRouteSpeech">
+              Повторить вслух
+            </button>
+          </div>
+        </form>
+
+        <div class="route-summary">
+          <div class="meta-item">
+            <span>Статус</span>
+            <strong id="navigationStatus">Маршрут не запущен</strong>
+          </div>
+          <div class="meta-item">
+            <span>Активный шаг</span>
+            <strong id="navigationCurrentPoint">-</strong>
+          </div>
+          <div class="meta-item">
+            <span>Назначение</span>
+            <strong id="navigationDestinationLabel">-</strong>
+          </div>
+        </div>
+
+        <p id="navigationMessage" class="muted">Маршрут не запущен.</p>
+        <p id="navigationServiceInfo" class="muted">Услуга МФЦ не выбрана.</p>
+        <p id="navigationBlockedPoints" class="muted">Перекрытых точек нет.</p>
+        <p id="navigationRouteText" class="muted">Маршрут пока не построен.</p>
+        <div id="navigationRoute" class="route-steps"></div>
+        <p class="muted">
+          Для подтверждения перехода к следующей точке используйте формы TYPE 4
+          (RFID) или TYPE 6 (распознавание лица) ниже.
+        </p>
+      </section>
+
       <section class="forms-grid">
         <article class="card">
           <div class="section-head">
@@ -232,4 +308,3 @@
     <script src="/static/js/app.js"></script>
   </body>
 </html>
-

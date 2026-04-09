@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import ValidationError
 
 from app.models import (
@@ -11,12 +13,36 @@ from app.models import (
     EnvironmentReading,
     LightEvent,
     SoundEvent,
+    StartNavigationRequest,
+    SynthesizeSpeechRequest,
     VoiceEvent,
     city_event_adapter,
 )
 
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+
+async def _dispatch_event_chain(request: Request, initial_events: list[Any]) -> list[dict[str, Any]]:
+    queue = list(initial_events)
+    dispatched: list[dict[str, Any]] = []
+
+    while queue:
+        event = queue.pop(0)
+        city_result = await request.app.state.city_client.send_event(
+            event.model_dump(exclude_none=True)
+        )
+        followups = await request.app.state.local_state.register_forwarded_event(event, city_result)
+        dispatched.append(
+            {
+                "accepted": city_result["ok"],
+                "event": event.model_dump(exclude_none=True),
+                "city": city_result,
+            }
+        )
+        queue.extend(followups)
+
+    return dispatched
 
 
 @router.get("/health")
@@ -48,12 +74,13 @@ async def post_event(request: Request, payload: dict[str, Any]) -> dict[str, Any
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
-    city_result = await request.app.state.city_client.send_event(event.model_dump())
-    await request.app.state.local_state.register_forwarded_event(event, city_result)
+    dispatched = await _dispatch_event_chain(request, [event])
+    primary = dispatched[0]
     return {
-        "accepted": city_result["ok"],
-        "event": event.model_dump(),
-        "city": city_result,
+        "accepted": primary["accepted"],
+        "event": primary["event"],
+        "city": primary["city"],
+        "followups": dispatched[1:],
     }
 
 
@@ -92,9 +119,8 @@ async def post_default_sound(request: Request, device_id: int) -> dict[str, Any]
         duration_ms=int(signal["duration_ms"]),
         frequency_hz=int(signal["frequency_hz"]),
     )
-    city_result = await request.app.state.city_client.send_event(event.model_dump())
-    await request.app.state.local_state.register_forwarded_event(event, city_result)
-    return {"accepted": city_result["ok"], "event": event.model_dump(), "city": city_result}
+    dispatched = await _dispatch_event_chain(request, [event])
+    return dispatched[0]
 
 
 @router.post("/actions/default-light/{device_id}")
@@ -106,9 +132,8 @@ async def post_default_light(request: Request, device_id: int) -> dict[str, Any]
         raise HTTPException(status_code=400, detail="В team.json не задан preset для TYPE 3.")
 
     event = LightEvent(type=3, device_id=device_id, color=color)
-    city_result = await request.app.state.city_client.send_event(event.model_dump())
-    await request.app.state.local_state.register_forwarded_event(event, city_result)
-    return {"accepted": city_result["ok"], "event": event.model_dump(), "city": city_result}
+    dispatched = await _dispatch_event_chain(request, [event])
+    return dispatched[0]
 
 
 @router.post("/actions/announce-recommendation")
@@ -123,9 +148,59 @@ async def announce_recommendation(
 
     text = recommendation["text"]
     event = VoiceEvent(type=1, text=text)
-    city_result = await request.app.state.city_client.send_event(event.model_dump())
-    await request.app.state.local_state.register_forwarded_event(event, city_result)
-    return {"accepted": city_result["ok"], "event": event.model_dump(), "city": city_result}
+    dispatched = await _dispatch_event_chain(request, [event])
+    return dispatched[0]
+
+
+@router.post("/tts")
+async def synthesize_speech(
+    request: Request,
+    body: SynthesizeSpeechRequest,
+) -> Response:
+    tts_service = request.app.state.tts_service
+    if not tts_service.is_ready():
+        raise HTTPException(status_code=503, detail="Нейросетевая озвучка недоступна.")
+
+    try:
+        wav_bytes = await asyncio.to_thread(tts_service.synthesize_bytes, body.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return Response(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers={
+            "Cache-Control": "public, max-age=31536000",
+            "X-TTS-Engine": "piper",
+            "X-TTS-Voice": tts_service.voice_name,
+        },
+    )
+
+
+@router.post("/navigation/start")
+async def start_navigation(
+    request: Request,
+    body: StartNavigationRequest,
+) -> dict[str, Any]:
+    try:
+        initial_events = await request.app.state.local_state.start_navigation(
+            destination_point_id=body.destination_point_id,
+            start_point_id=body.start_point_id,
+            waypoint_point_ids=body.waypoint_point_ids,
+            service_id=body.service_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    dispatched = await _dispatch_event_chain(request, initial_events)
+    state = await request.app.state.local_state.snapshot()
+    return {
+        "ok": True,
+        "navigation": state["navigation"],
+        "dispatched": dispatched,
+    }
 
 
 @router.get("/devices/{device_id}/command")

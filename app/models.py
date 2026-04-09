@@ -96,3 +96,18 @@ class AnnounceRecommendationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["clothing", "traffic", "obstacle"]
+
+
+class StartNavigationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    destination_point_id: str | None = Field(default=None, min_length=1, max_length=100)
+    start_point_id: str | None = Field(default=None, min_length=1, max_length=100)
+    waypoint_point_ids: list[str] = Field(default_factory=list, max_length=20)
+    service_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class SynthesizeSpeechRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=2000)

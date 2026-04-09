@@ -2,6 +2,11 @@ const teamProfile = window.__TEAM_PROFILE__ || {};
 
 const byId = (id) => document.getElementById(id);
 
+let routeSpeechEnabled = true;
+let lastSpokenNavigationKey = "";
+let lastRouteSpeechText = "";
+let latestNavigationPoints = [];
+
 async function postJson(url, payload) {
   const response = await fetch(url, {
     method: "POST",
@@ -40,6 +45,189 @@ function formatSeconds(value) {
   return `${Math.round(value / 60)} мин`;
 }
 
+function formatNavigationStatus(status) {
+  switch (status) {
+    case "awaiting_confirmation":
+      return "Ожидаем подтверждение";
+    case "blocked":
+      return "Маршрут заблокирован";
+    case "completed":
+      return "Маршрут завершён";
+    case "not_configured":
+      return "Точки не настроены";
+    case "idle":
+    default:
+      return "Маршрут не запущен";
+  }
+}
+
+function parseWaypointPointIds(value) {
+  return (value || "")
+    .split(/[,\n;]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function setServiceOptions(selectId, services, preferredValue) {
+  const select = byId(selectId);
+  const serviceList = services || [];
+
+  if (!serviceList.length) {
+    select.innerHTML = '<option value="">Услуги не настроены</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.innerHTML = [
+    '<option value="">Без услуги МФЦ</option>',
+    ...serviceList.map((service) => (
+      `<option value="${service.service_id}">${service.service_name}</option>`
+    )),
+  ].join("");
+  select.value = serviceList.some((service) => service.service_id === preferredValue)
+    ? preferredValue
+    : "";
+  select.disabled = false;
+}
+
+function formatPointSignal(point) {
+  if (!point) {
+    return "-";
+  }
+
+  if (point.device_type === "type2" && point.color) {
+    const color = point.color;
+    return `device_id=${point.device_id}, RGB=(${color.r}, ${color.g}, ${color.b})`;
+  }
+
+  return `device_id=${point.device_id}, frequency=${point.frequency_hz} Hz, duration=${point.duration_ms} ms`;
+}
+
+function setPointOptions(selectId, points, preferredValue, excludedPointId = null) {
+  const select = byId(selectId);
+  const currentValue = select.value;
+  const availablePoints = excludedPointId
+    ? points.filter((point) => point.point_id !== excludedPointId)
+    : points.slice();
+
+  if (!availablePoints.length) {
+    select.innerHTML = '<option value="">Нет доступных точек</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.innerHTML = availablePoints
+    .map((point) => `<option value="${point.point_id}">${point.name}</option>`)
+    .join("");
+
+  const resolvedValue = availablePoints.some((point) => point.point_id === preferredValue)
+    ? preferredValue
+    : availablePoints.some((point) => point.point_id === currentValue)
+      ? currentValue
+      : availablePoints[0].point_id;
+
+  select.value = resolvedValue;
+  select.disabled = false;
+}
+
+function updateSpeechButtons() {
+  const toggleButton = byId("toggleRouteSpeech");
+  toggleButton.textContent = `Озвучка маршрута: ${routeSpeechEnabled ? "вкл" : "выкл"}`;
+  byId("repeatRouteSpeech").disabled = !lastRouteSpeechText;
+}
+
+function speakText(text) {
+  if (!routeSpeechEnabled || !text || !("speechSynthesis" in window)) {
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "ru-RU";
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
+function maybeSpeakNavigation(navigation) {
+  if (!routeSpeechEnabled || !navigation?.message) {
+    return;
+  }
+
+  if (navigation.status === "idle" || navigation.status === "not_configured") {
+    return;
+  }
+
+  const speechKey = [
+    navigation.status || "",
+    navigation.started_at || "",
+    navigation.completed_at || "",
+    navigation.current_point?.point_id || "",
+    navigation.message,
+  ].join("|");
+
+  if (speechKey === lastSpokenNavigationKey) {
+    return;
+  }
+
+  lastSpokenNavigationKey = speechKey;
+  lastRouteSpeechText = navigation.message;
+  updateSpeechButtons();
+  speakText(navigation.message);
+}
+
+function renderNavigation(navigation) {
+  const points = navigation.points || [];
+  latestNavigationPoints = points;
+  const startPointId = navigation.start_point?.point_id || points[0]?.point_id || "";
+  const destinationPointId = navigation.destination?.point_id || "";
+  const blockedPoints = navigation.blocked_points || [];
+  const waypoints = navigation.waypoints || [];
+
+  setPointOptions("navigationStartPoint", points, startPointId);
+  setPointOptions("navigationDestination", points, destinationPointId, byId("navigationStartPoint").value);
+  setServiceOptions("navigationService", navigation.available_services || [], navigation.service?.service_id || "");
+
+  byId("navigationStatus").textContent = formatNavigationStatus(navigation.status);
+  byId("navigationCurrentPoint").textContent = navigation.current_step
+    ? `${navigation.current_point?.name || "-"} (${navigation.current_step.connection_type_label})`
+    : navigation.current_point?.name || "-";
+  byId("navigationDestinationLabel").textContent = navigation.destination?.name || "-";
+  byId("navigationMessage").textContent = navigation.message || "Маршрут не запущен.";
+  byId("navigationServiceInfo").textContent = navigation.service
+    ? `Услуга: ${navigation.service.service_name}. Талон: ${navigation.service.ticket_number}.`
+    : "Услуга МФЦ не выбрана.";
+  byId("navigationBlockedPoints").textContent = blockedPoints.length
+    ? `Перекрытые точки: ${blockedPoints.map((point) => point.name).join(", ")}.`
+    : "Перекрытых точек нет.";
+  byId("navigationRouteText").textContent = navigation.route_text
+    ? `Последовательность маршрута: ${navigation.route_text}.`
+    : "Маршрут пока не построен.";
+  byId("navigationWaypoints").value = waypoints.map((point) => point.point_id).join(", ");
+
+  const routeContainer = byId("navigationRoute");
+  if (!navigation.route?.length) {
+    routeContainer.innerHTML = '<div class="stack-item"><span class="small">Маршрут пока не построен.</span></div>';
+    return;
+  }
+
+  routeContainer.innerHTML = navigation.route
+    .map((step, index) => `
+      <div class="route-step route-step--${step.status}">
+        <div>
+          <strong>${index + 1}. ${step.from_point.name} -> ${step.to_point.name}</strong>
+          <span class="small">${step.connection_type_label}</span>
+          <span class="small">${step.instruction}</span>
+          <span class="small">${formatPointSignal(step.to_point)}</span>
+        </div>
+        <span class="route-badge route-badge--${step.status}">
+          ${step.status === "confirmed" ? "Пройден" : step.status === "active" ? "Активный шаг" : "Ожидает"}
+        </span>
+      </div>
+    `)
+    .join("");
+}
+
 async function refreshState() {
   const response = await fetch("/api/state");
   const state = await response.json();
@@ -64,6 +252,9 @@ async function refreshState() {
   byId("clothingRecommendation").textContent = state.recommendations.clothing?.text || "Нет данных.";
   byId("trafficRecommendation").textContent = state.recommendations.traffic?.text || "Нет данных.";
   byId("obstacleRecommendation").textContent = state.recommendations.obstacle?.text || "Нет данных.";
+
+  renderNavigation(state.navigation || {});
+  maybeSpeakNavigation(state.navigation || {});
 
   renderObjectEntries("devicesType1", state.devices_type1, (key, value) => `
     <strong>device_id=${key}</strong>
@@ -95,6 +286,41 @@ function formDataToObject(form) {
 function numberOrNull(value) {
   return value === "" || value === null || value === undefined ? null : Number(value);
 }
+
+document.getElementById("navigationForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = formDataToObject(event.target);
+  await postJson("/api/navigation/start", {
+    start_point_id: form.start_point_id,
+    destination_point_id: form.destination_point_id,
+    waypoint_point_ids: parseWaypointPointIds(form.waypoint_point_ids),
+    service_id: form.service_id || null,
+  });
+});
+
+document.getElementById("navigationStartPoint").addEventListener("change", () => {
+  setPointOptions(
+    "navigationDestination",
+    latestNavigationPoints,
+    byId("navigationDestination").value,
+    byId("navigationStartPoint").value,
+  );
+});
+
+document.getElementById("toggleRouteSpeech").addEventListener("click", () => {
+  routeSpeechEnabled = !routeSpeechEnabled;
+  if (!routeSpeechEnabled && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+  updateSpeechButtons();
+});
+
+document.getElementById("repeatRouteSpeech").addEventListener("click", () => {
+  if (!lastRouteSpeechText) {
+    return;
+  }
+  speakText(lastRouteSpeechText);
+});
 
 document.getElementById("voiceForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -207,6 +433,7 @@ document.querySelectorAll("[data-announce]").forEach((button) => {
   });
 });
 
+updateSpeechButtons();
 refreshState().catch((error) => {
   byId("lastResponse").textContent = String(error);
 });

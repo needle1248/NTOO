@@ -10,10 +10,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.config import get_settings, load_team_profile
+from app.config import get_settings, load_reference_data, load_team_profile
 from app.routers.api import router as api_router
 from app.services.city_client import CityClient
 from app.services.local_state import LocalState
+from app.services.tts_service import NeuralTtsService
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -33,6 +34,7 @@ async def city_poll_loop(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    reference_data = load_reference_data(settings)
     team_profile = load_team_profile(settings)
 
     @asynccontextmanager
@@ -40,7 +42,11 @@ def create_app() -> FastAPI:
         app.state.settings = settings
         app.state.team_profile = team_profile
         app.state.city_client = CityClient(settings)
-        app.state.local_state = LocalState(team_profile)
+        app.state.local_state = LocalState(
+            team_profile,
+            signal_catalog=reference_data.get("signal_presets", {}),
+        )
+        app.state.tts_service = NeuralTtsService(settings)
 
         poll_task = None
         if settings.enable_city_polling:
