@@ -2,11 +2,4 @@
 __pycache__/
 .pytest_cache/
 *.pyc
-*.pyo
-*.pyd
-logs/
-data/
-dist/
-build/
-.DS_Store
 

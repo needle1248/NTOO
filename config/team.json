@@ -1,0 +1,20 @@
+{
+  "team_id": 1,
+  "team_name": "Команда 1",
+  "hero_user_id": "SpiderMan",
+  "devices": {
+    "type1_ids": [1, 2, 3, 4, 5, 6, 7, 8],
+    "type2_ids": [],
+    "vibration_device_id": null
+  },
+  "bus": {
+    "target_stop_id": null,
+    "route_by_bus": {
+      "default": []
+    }
+  },
+  "notes": [
+    "Заполните target_stop_id и route_by_bus под свой микрорайон.",
+    "type2_ids и vibration_device_id лучше уточнить по вашей схеме монтажа."
+  ]
+}

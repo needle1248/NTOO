@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ settings.app_name }}</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Локальный сервер микрорайона</p>
+          <h1>{{ team.team_name }}</h1>
+          <p class="hero-copy">
+            Сервер принимает события от умных устройств, пересылает TYPE 1..6 на
+            городской сервер и показывает текущее состояние микрорайона в одном UI.
+          </p>
+        </div>
+        <div class="hero-meta">
+          <div class="meta-item">
+            <span>Городской сервер</span>
+            <strong>{{ settings.city_server_base_url }}</strong>
+          </div>
+          <div class="meta-item">
+            <span>Токен</span>
+            <strong>{{ settings.city_access_token }}</strong>
+          </div>
+          <div class="meta-item">
+            <span>Hero ID</span>
+            <strong>{{ team.hero_user_id or "не задан" }}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="stats-grid">
+        <article class="card accent">
+          <h2>Связь с городом</h2>
+          <p id="cityStatus" class="status-pill">Проверяем...</p>
+          <p id="cityError" class="muted">Пока нет данных.</p>
+        </article>
+        <article class="card accent">
+          <h2>ETA автобуса</h2>
+          <p id="etaValue" class="big-value">-</p>
+          <p id="etaBaseline" class="muted">Нет расчёта</p>
+        </article>
+        <article class="card accent">
+          <h2>Виброплатформа</h2>
+          <p id="vibrationState" class="big-value">Неактивна</p>
+          <p id="distanceValue" class="muted">Нет данных от датчика расстояния.</p>
+        </article>
+        <article class="card accent">
+          <h2>Озвучка</h2>
+          <p id="queueSize" class="big-value">0</p>
+          <p class="muted">Сообщений в голосовой очереди.</p>
+        </article>
+      </section>
+
+      <section class="split">
+        <article class="card">
+          <div class="section-head">
+            <h2>Быстрые действия</h2>
+            <p>Готовые команды под частоты и цвета вашей команды.</p>
+          </div>
+          <div class="quick-actions">
+            <button class="action-btn" id="sendDefaultSound">Отправить TYPE 2</button>
+            <button class="action-btn" id="sendDefaultLight">Отправить TYPE 3</button>
+            <button class="action-btn" data-announce="clothing">Озвучить одежду</button>
+            <button class="action-btn" data-announce="traffic">Озвучить пробки</button>
+            <button class="action-btn" data-announce="obstacle">Озвучить препятствие</button>
+          </div>
+          <p class="muted" id="quickActionHint">
+            Для TYPE 2/3 при необходимости задайте корректные `device_id` в формах ниже.
+          </p>
+        </article>
+
+        <article class="card">
+          <div class="section-head">
+            <h2>Рекомендации</h2>
+            <p>Собираются из датчика MGS-THP80, ETA и сообщений TYPE 5.</p>
+          </div>
+          <div class="recommendations">
+            <div>
+              <h3>Одежда</h3>
+              <p id="clothingRecommendation" class="muted">Нет данных.</p>
+            </div>
+            <div>
+              <h3>Пробки</h3>
+              <p id="trafficRecommendation" class="muted">Нет данных.</p>
+            </div>
+            <div>
+              <h3>Препятствия</h3>
+              <p id="obstacleRecommendation" class="muted">Нет данных.</p>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="forms-grid">
+        <article class="card">
+          <div class="section-head">
+            <h2>TYPE 1..6</h2>
+            <p>Все события уходят на локальный сервер и затем форвардятся на городской `/event`.</p>
+          </div>
+
+          <form class="form" id="voiceForm">
+            <h3>TYPE 1. Озвучка</h3>
+            <textarea name="text" rows="3" maxlength="200" placeholder="Текст голосового сообщения"></textarea>
+            <button type="submit">Отправить TYPE 1</button>
+          </form>
+
+          <form class="form" id="soundForm">
+            <h3>TYPE 2. Звук</h3>
+            <div class="grid-2">
+              <input name="device_id" type="number" placeholder="device_id" required />
+              <input name="frequency_hz" type="number" placeholder="frequency_hz" required />
+            </div>
+            <input name="duration_ms" type="number" placeholder="duration_ms" required />
+            <button type="submit">Отправить TYPE 2</button>
+          </form>
+
+          <form class="form" id="lightForm">
+            <h3>TYPE 3. Подсветка</h3>
+            <div class="grid-2">
+              <input name="device_id" type="number" placeholder="device_id" required />
+              <input name="r" type="number" min="0" max="255" placeholder="R" required />
+            </div>
+            <div class="grid-2">
+              <input name="g" type="number" min="0" max="255" placeholder="G" required />
+              <input name="b" type="number" min="0" max="255" placeholder="B" required />
+            </div>
+            <button type="submit">Отправить TYPE 3</button>
+          </form>
+
+          <form class="form" id="rfidForm">
+            <h3>TYPE 4. RFID</h3>
+            <div class="grid-2">
+              <input name="device_id" type="number" placeholder="device_id" required />
+              <input name="rfid_code" placeholder="rfid_code" required />
+            </div>
+            <button type="submit">Отправить TYPE 4</button>
+          </form>
+
+          <form class="form" id="obstacleForm">
+            <h3>TYPE 5. Препятствие</h3>
+            <div class="grid-2">
+              <input name="location_id" placeholder="location_id" required />
+              <input name="obstacle_type" placeholder="construction / closed_path" required />
+            </div>
+            <textarea name="message" rows="2" maxlength="200" placeholder="Сообщение для озвучки"></textarea>
+            <label class="checkbox">
+              <input name="reroute_required" type="checkbox" checked />
+              Нужно перестроение маршрута
+            </label>
+            <button type="submit">Отправить TYPE 5</button>
+          </form>
+
+          <form class="form" id="faceForm">
+            <h3>TYPE 6. Распознавание лица</h3>
+            <div class="grid-2">
+              <input name="device_id" type="number" placeholder="device_id" required />
+              <input name="user_id" placeholder="user_id" required />
+            </div>
+            <input name="confidence" type="number" step="0.01" min="0" max="1" placeholder="confidence" required />
+            <button type="submit">Отправить TYPE 6</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="section-head">
+            <h2>Датчики и команды устройствам</h2>
+            <p>Эти формы обновляют локальную логику по одежде, ETA и вибросигналу.</p>
+          </div>
+
+          <form class="form" id="environmentForm">
+            <h3>MGS-THP80</h3>
+            <div class="grid-2">
+              <input name="temperature_c" type="number" step="0.1" placeholder="temperature °C" required />
+              <input name="humidity_percent" type="number" step="0.1" placeholder="humidity %" required />
+            </div>
+            <input name="pressure_hpa" type="number" step="0.1" placeholder="pressure hPa" required />
+            <button type="submit">Обновить климат</button>
+          </form>
+
+          <form class="form" id="distanceForm">
+            <h3>Датчик расстояния</h3>
+            <div class="grid-2">
+              <input name="device_id" type="number" placeholder="device_id" required />
+              <input name="distance_cm" type="number" step="0.1" placeholder="distance_cm" required />
+            </div>
+            <div class="grid-2">
+              <input name="threshold_cm" type="number" step="0.1" placeholder="threshold_cm" value="40" required />
+              <label class="checkbox">
+                <input name="bus_detected" type="checkbox" />
+                Автобус обнаружен
+              </label>
+            </div>
+            <button type="submit">Обновить расстояние</button>
+          </form>
+
+          <div class="section-head">
+            <h2>Последний ответ</h2>
+            <p>Полезно для отладки локального сервера на площадке.</p>
+          </div>
+          <pre id="lastResponse" class="response-box">Ожидаем действие...</pre>
+        </article>
+      </section>
+
+      <section class="stream-grid">
+        <article class="card">
+          <h2>Активные TYPE 1</h2>
+          <div id="devicesType1" class="stack-list"></div>
+        </article>
+        <article class="card">
+          <h2>Активные TYPE 2</h2>
+          <div id="devicesType2" class="stack-list"></div>
+        </article>
+        <article class="card">
+          <h2>Очередь озвучки</h2>
+          <div id="voiceQueue" class="stack-list"></div>
+        </article>
+        <article class="card">
+          <h2>Журнал</h2>
+          <div id="logs" class="stack-list"></div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      window.__TEAM_PROFILE__ = {{ team | tojson }};
+    </script>
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>
+

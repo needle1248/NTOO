@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+import json
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    app_name: str = "NTO Smart City Local Server"
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+    city_server_base_url: str = "http://192.168.31.63:8000"
+    city_event_path: str = "/event"
+    city_debug_state_path: str = "/debug/state"
+    city_access_token: str = "kids8461"
+    city_poll_interval_seconds: float = 2.0
+    city_request_timeout_seconds: float = 5.0
+    enable_city_polling: bool = True
+
+    team_id: int = 1
+    team_name: str = "Команда 1"
+    team_config_path: str = "config/team.json"
+    reference_data_path: str = "config/reference-data.json"
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    @property
+    def city_event_url(self) -> str:
+        return f"{self.city_server_base_url.rstrip('/')}{self.city_event_path}"
+
+    @property
+    def city_debug_state_url(self) -> str:
+        return f"{self.city_server_base_url.rstrip('/')}{self.city_debug_state_path}"
+
+
+def _load_json(path: str) -> dict[str, Any]:
+    json_path = Path(path)
+    if not json_path.exists():
+        return {}
+    return json.loads(json_path.read_text(encoding="utf-8"))
+
+
+def load_reference_data(settings: Settings) -> dict[str, Any]:
+    return _load_json(settings.reference_data_path)
+
+
+def load_team_profile(settings: Settings) -> dict[str, Any]:
+    reference = load_reference_data(settings)
+    team_config = _load_json(settings.team_config_path)
+
+    team_id = str(team_config.get("team_id", settings.team_id))
+    preset = reference.get("signal_presets", {}).get(team_id, {})
+    hero_id = reference.get("heroes", {}).get(team_id)
+
+    profile: dict[str, Any] = {
+        "team_id": int(team_id),
+        "team_name": team_config.get("team_name", settings.team_name),
+        "hero_user_id": team_config.get("hero_user_id", hero_id),
+        "signal": {
+            "type1": preset.get("type1", {}),
+            "type2": preset.get("type2", {}),
+        },
+        "devices": team_config.get("devices", {}),
+        "bus": team_config.get("bus", {}),
+        "scenario": team_config.get("scenario", {}),
+        "notes": team_config.get("notes", []),
+    }
+
+    profile["signal"]["type1"].update(team_config.get("signal", {}).get("type1", {}))
+    profile["signal"]["type2"].update(team_config.get("signal", {}).get("type2", {}))
+    return profile
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
+

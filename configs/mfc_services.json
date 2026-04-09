@@ -1,7 +1,0 @@
-{
-  "services": [
-    {"service_id": "passport", "service_name": "Passport renewal", "window_node": 37, "queue_prefix": "A"},
-    {"service_id": "housing", "service_name": "Housing certificate", "window_node": 39, "queue_prefix": "B"},
-    {"service_id": "benefits", "service_name": "Benefits registration", "window_node": 40, "queue_prefix": "C"}
-  ]
-}
