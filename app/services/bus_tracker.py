@@ -173,7 +173,7 @@ class BusTracker:
 def extract_bus_records(payload: Any) -> list[dict[str, Any]]:
     seen: dict[tuple[str, str, int], dict[str, Any]] = {}
 
-    def walk(value: Any) -> None:
+    def walk(value: Any, path: tuple[str, ...] = ()) -> None:
         if isinstance(value, dict):
             if "bus_id" in value and "current_stop" in value:
                 bus_id = str(value["bus_id"])
@@ -184,11 +184,20 @@ def extract_bus_records(payload: Any) -> list[dict[str, Any]]:
                     "current_stop": current_stop,
                     "timestamp": timestamp,
                 }
-            for nested in value.values():
-                walk(nested)
+            elif len(path) >= 2 and path[-2] == "buses" and "current_stop" in value:
+                bus_id = str(path[-1])
+                current_stop = _stringify_stop(value["current_stop"])
+                timestamp = int(value.get("timestamp") or time.time())
+                seen[(bus_id, current_stop, timestamp)] = {
+                    "bus_id": bus_id,
+                    "current_stop": current_stop,
+                    "timestamp": timestamp,
+                }
+            for key, nested in value.items():
+                walk(nested, (*path, str(key)))
         elif isinstance(value, list):
             for item in value:
-                walk(item)
+                walk(item, path)
 
     walk(payload)
     return list(seen.values())

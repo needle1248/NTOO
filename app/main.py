@@ -14,6 +14,7 @@ from app.config import get_settings, load_reference_data, load_team_profile
 from app.routers.api import router as api_router
 from app.services.city_client import CityClient
 from app.services.local_state import LocalState
+from app.services.text_generation_service import TextGenerationService
 from app.services.tts_service import NeuralTtsService
 
 
@@ -42,9 +43,14 @@ def create_app() -> FastAPI:
         app.state.settings = settings
         app.state.team_profile = team_profile
         app.state.city_client = CityClient(settings)
+        app.state.text_generation_service = TextGenerationService(settings)
         app.state.local_state = LocalState(
             team_profile,
             signal_catalog=reference_data.get("signal_presets", {}),
+            city_receive_log_path=settings.city_receive_log_path,
+            city_receive_log_entries_limit=settings.city_receive_log_entries_limit,
+            city_receive_log_updates_preview_limit=settings.city_receive_log_updates_preview_limit,
+            text_generation_service=app.state.text_generation_service,
         )
         app.state.tts_service = NeuralTtsService(settings)
 

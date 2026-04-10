@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from collections import deque
+from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from app.models import (
@@ -66,11 +69,21 @@ class LocalState:
         self,
         team_profile: dict[str, Any],
         signal_catalog: dict[str, Any] | None = None,
+        city_receive_log_path: str | None = None,
+        city_receive_log_entries_limit: int = 20,
+        city_receive_log_updates_preview_limit: int = 8,
+        text_generation_service: Any | None = None,
     ) -> None:
         self.team_profile = team_profile
         self.signal_catalog = signal_catalog or {}
+        self.text_generation_service = text_generation_service
         self._lock = asyncio.Lock()
         self.started_at = _now_iso()
+        self.city_receive_log_path = Path(city_receive_log_path) if city_receive_log_path else None
+        self.city_receive_log_entries: deque[dict[str, Any]] = deque(
+            maxlen=max(city_receive_log_entries_limit, 1)
+        )
+        self.city_receive_log_updates_preview_limit = max(city_receive_log_updates_preview_limit, 1)
 
         self.events_log: deque[dict[str, Any]] = deque(maxlen=200)
         self.environment: dict[str, Any] | None = None
@@ -93,7 +106,18 @@ class LocalState:
             "last_error": None,
             "last_forward_result": None,
             "raw_state": None,
+            "collector": {
+                "snapshots_seen": 0,
+                "updates_seen": 0,
+                "last_update_at": None,
+                "last_snapshot_summary": None,
+            },
         }
+        self.city_updates: deque[dict[str, Any]] = deque(maxlen=400)
+        self.city_snapshots: deque[dict[str, Any]] = deque(maxlen=25)
+        self._city_list_item_signatures: dict[str, set[str]] = {}
+        self._city_value_signatures: dict[str, str] = {}
+        self._city_container_members: dict[str, set[str]] = {}
         self.metrics = {"forwarded_ok": 0, "forwarded_failed": 0}
 
         self.devices_type1: dict[str, dict[str, Any]] = {}
@@ -106,6 +130,7 @@ class LocalState:
         route_by_bus = team_profile.get("bus", {}).get("route_by_bus", {})
         self.target_stop_id = team_profile.get("bus", {}).get("target_stop_id")
         self.bus_tracker = BusTracker(route_by_bus=route_by_bus)
+        self._rewrite_city_receive_log()
 
         scenario = team_profile.get("scenario", {})
         self.navigation_points = self._build_navigation_points(scenario)
@@ -118,29 +143,66 @@ class LocalState:
         self.navigation_state = self._build_initial_navigation_state(scenario)
 
     async def mark_city_error(self, error: str) -> None:
+        observed_at = _now_iso()
         async with self._lock:
             self.city["connected"] = False
             self.city["last_error"] = error
-            self.city["last_poll_at"] = _now_iso()
+            self.city["last_poll_at"] = observed_at
+            self._append_city_receive_log_entry(
+                {
+                    "observed_at": observed_at,
+                    "kind": "error",
+                    "error": error,
+                }
+            )
+            self._rewrite_city_receive_log()
 
     async def refresh_city_state(self, payload: dict[str, Any]) -> None:
+        observed_at = _now_iso()
+        snapshot_payload = deepcopy(payload)
         async with self._lock:
             self.city["connected"] = True
             self.city["last_error"] = None
-            self.city["last_poll_at"] = _now_iso()
-            self.city["raw_state"] = payload
+            self.city["last_poll_at"] = observed_at
+            self.city["raw_state"] = snapshot_payload
 
-            self.devices_type1 = self._normalize_device_bucket(payload.get("devices_type1"))
-            self.devices_type2 = self._normalize_device_bucket(payload.get("devices_type2"))
-            self.voice_queue = self._normalize_records(payload.get("voice_queue"))
-            self.obstacles = self._normalize_records(payload.get("obstacles"))
+            snapshot_summary = self._store_city_snapshot(snapshot_payload, observed_at)
+            updates_count = self._collect_city_updates(snapshot_payload, observed_at)
+            self.city["collector"]["snapshots_seen"] += 1
+            self.city["collector"]["updates_seen"] += updates_count
+            self.city["collector"]["last_snapshot_summary"] = snapshot_summary
+            if updates_count:
+                self.city["collector"]["last_update_at"] = observed_at
 
-            events = payload.get("events", {}) if isinstance(payload.get("events"), dict) else {}
+            self.devices_type1 = self._normalize_device_bucket(snapshot_payload.get("devices_type1"))
+            self.devices_type2 = self._normalize_device_bucket(snapshot_payload.get("devices_type2"))
+            self.voice_queue = self._normalize_records(snapshot_payload.get("voice_queue"))
+            self.obstacles = self._normalize_records(snapshot_payload.get("obstacles"))
+
+            events = (
+                snapshot_payload.get("events", {})
+                if isinstance(snapshot_payload.get("events"), dict)
+                else {}
+            )
             self.events_rfid = self._normalize_records(events.get("rfid"))
             self.events_face = self._normalize_records(events.get("face"))
 
-            self.bus_tracker.record_many(extract_bus_records(payload))
+            self.bus_tracker.record_many(extract_bus_records(snapshot_payload))
             self._rebuild_recommendations()
+            self._append_city_receive_log_entry(
+                {
+                    "observed_at": observed_at,
+                    "kind": "snapshot",
+                    "summary": deepcopy(snapshot_summary),
+                    "updates_count": updates_count,
+                    "update_preview": deepcopy(
+                        list(self.city_updates)[
+                            : min(self.city_receive_log_updates_preview_limit, updates_count)
+                        ]
+                    ),
+                }
+            )
+            self._rewrite_city_receive_log()
 
     async def start_navigation(
         self,
@@ -174,6 +236,11 @@ class LocalState:
                 raise ValueError("Стартовая точка маршрута не найдена.")
             if resolved_destination_id not in self.navigation_points_by_id:
                 raise ValueError("Точка назначения не найдена.")
+            resolved_waypoint_ids = [
+                point_id
+                for point_id in resolved_waypoint_ids
+                if point_id not in {resolved_start_id, resolved_destination_id}
+            ]
 
             start_point = self.navigation_points_by_id[resolved_start_id]
             destination_point = self.navigation_points_by_id[resolved_destination_id]
@@ -206,14 +273,20 @@ class LocalState:
             )
 
             if not route_segments:
-                service_prefix = ""
-                if service and ticket_number:
-                    service_prefix = (
-                        f"Услуга {service['service_name']}, талон {ticket_number}. "
-                    )
-                message = (
-                    f"{service_prefix}Маршрут не требуется: пользователь уже находится в "
-                    f"{self._spoken_point_name(destination_point)}."
+                base_message = self._compose_voice_message(
+                    self._service_intro(service, ticket_number),
+                    (
+                        f"Вы уже находитесь у {self._spoken_point_name(destination_point)}, "
+                        "поэтому строить маршрут не нужно."
+                    ),
+                )
+                message = self._refine_voice_text(
+                    base_message,
+                    intent="navigation_already_there",
+                    context={
+                        "start_point_id": resolved_start_id,
+                        "destination_point_id": resolved_destination_id,
+                    },
                 )
                 self.navigation_state["message"] = message
                 self.navigation_state["start_point_id"] = resolved_destination_id
@@ -233,16 +306,24 @@ class LocalState:
             first_segment = route_segments[0]
             first_point = self.navigation_points_by_id[first_segment["to_point_id"]]
             route_text = self._format_route_sequence(route_segments)
-            service_prefix = ""
-            if service and ticket_number:
-                service_prefix = (
-                    f"Услуга {service['service_name']}, талон {ticket_number}. "
-                )
-            message = (
-                f"{service_prefix}Маршрут до {self._spoken_point_name(destination_point)} построен. "
-                f"Старт: {start_point['name']}. "
-                f"Маршрут: {route_text}. "
-                f"{self._build_step_prompt(first_segment)}"
+            base_message = self._compose_voice_message(
+                self._service_intro(service, ticket_number),
+                f"Маршрут до {self._spoken_point_name(destination_point)} готов.",
+                f"Стартуем от {start_point['name']}.",
+                self._build_waypoint_notice(resolved_waypoint_ids),
+                self._build_step_prompt(first_segment, lead="Сначала"),
+            )
+            message = self._refine_voice_text(
+                base_message,
+                intent="navigation_start",
+                context={
+                    "start_point_id": resolved_start_id,
+                    "destination_point_id": resolved_destination_id,
+                    "waypoint_point_ids": resolved_waypoint_ids,
+                    "route_text": route_text,
+                    "service_id": service_id,
+                    "ticket_number": ticket_number,
+                },
             )
             self.navigation_state["message"] = message
             self._append_navigation_log(
@@ -360,6 +441,7 @@ class LocalState:
                     "last_poll_at": self.city["last_poll_at"],
                     "last_error": self.city["last_error"],
                     "last_forward_result": self.city["last_forward_result"],
+                    "collector": self._collector_snapshot(),
                 },
                 "metrics": self.metrics,
                 "devices_type1": self.devices_type1,
@@ -377,11 +459,214 @@ class LocalState:
                 "buses": buses,
                 "navigation": self._navigation_snapshot(),
                 "logs": list(self.events_log),
+                "city_updates_preview": deepcopy(list(self.city_updates)[:15]),
             }
 
-    async def raw_city_state(self) -> dict[str, Any] | None:
+    async def raw_city_state(self, snapshot_limit: int = 5) -> dict[str, Any]:
         async with self._lock:
-            return self.city["raw_state"]
+            return {
+                "collector": self._collector_snapshot(),
+                "raw": deepcopy(self.city["raw_state"]),
+                "snapshots": [
+                    {
+                        "observed_at": entry["observed_at"],
+                        "summary": deepcopy(entry["summary"]),
+                        "payload": deepcopy(entry["payload"]),
+                    }
+                    for entry in list(self.city_snapshots)[:snapshot_limit]
+                ],
+            }
+
+    async def city_feed(self, limit: int = 50) -> dict[str, Any]:
+        async with self._lock:
+            return {
+                "collector": self._collector_snapshot(),
+                "updates": deepcopy(list(self.city_updates)[:limit]),
+            }
+
+    def _collector_snapshot(self) -> dict[str, Any]:
+        collector = self.city["collector"]
+        return {
+            "snapshots_seen": collector["snapshots_seen"],
+            "updates_seen": collector["updates_seen"],
+            "snapshots_buffered": len(self.city_snapshots),
+            "updates_buffered": len(self.city_updates),
+            "receive_log_entries": len(self.city_receive_log_entries),
+            "receive_log_path": str(self.city_receive_log_path) if self.city_receive_log_path else None,
+            "last_update_at": collector["last_update_at"],
+            "last_snapshot_summary": deepcopy(collector["last_snapshot_summary"]),
+        }
+
+    def _store_city_snapshot(self, payload: dict[str, Any], observed_at: str) -> dict[str, Any]:
+        summary = self._build_city_snapshot_summary(payload)
+        self.city_snapshots.appendleft(
+            {
+                "observed_at": observed_at,
+                "summary": summary,
+                "payload": payload,
+            }
+        )
+        return summary
+
+    def _build_city_snapshot_summary(self, payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {"root_type": type(payload).__name__}
+
+        collection_sizes = {}
+        for key, value in payload.items():
+            if isinstance(value, (dict, list)):
+                collection_sizes[str(key)] = len(value)
+
+        return {
+            "root_keys": sorted(str(key) for key in payload.keys()),
+            "collection_sizes": collection_sizes,
+            "bus_records": len(extract_bus_records(payload)),
+        }
+
+    def _collect_city_updates(self, payload: Any, observed_at: str) -> int:
+        updates_count = 0
+
+        def walk(path: str, value: Any) -> None:
+            nonlocal updates_count
+
+            container_key = path or "__root__"
+            if isinstance(value, list):
+                seen_signatures = self._city_list_item_signatures.setdefault(container_key, set())
+                for item in value:
+                    signature = self._fingerprint(item)
+                    if signature in seen_signatures:
+                        continue
+                    seen_signatures.add(signature)
+                    self._record_city_update(
+                        path=path,
+                        kind="list_item",
+                        value=item,
+                        observed_at=observed_at,
+                    )
+                    updates_count += 1
+                return
+
+            if isinstance(value, dict):
+                is_container = (
+                    not path
+                    or self._is_collection_container(value)
+                    or container_key in self._city_container_members
+                )
+                if path and not is_container:
+                    if self._record_city_value_change(path, value, observed_at):
+                        updates_count += 1
+                    return
+
+                current_children = set()
+                for key, nested in value.items():
+                    key_str = str(key)
+                    current_children.add(key_str)
+                    child_path = f"{path}.{key_str}" if path else key_str
+                    if isinstance(nested, (dict, list)):
+                        walk(child_path, nested)
+                    elif self._record_city_value_change(child_path, nested, observed_at):
+                        updates_count += 1
+
+                previous_children = self._city_container_members.get(container_key, set())
+                for removed_key in sorted(previous_children - current_children):
+                    removed_path = f"{path}.{removed_key}" if path else removed_key
+                    self._city_value_signatures.pop(removed_path, None)
+                    self._record_city_update(
+                        path=removed_path,
+                        kind="removed",
+                        value=None,
+                        observed_at=observed_at,
+                    )
+                    updates_count += 1
+                self._city_container_members[container_key] = current_children
+                return
+
+            if path and self._record_city_value_change(path, value, observed_at):
+                updates_count += 1
+
+        walk("", payload)
+        return updates_count
+
+    def _record_city_value_change(self, path: str, value: Any, observed_at: str) -> bool:
+        signature = self._fingerprint(value)
+        if self._city_value_signatures.get(path) == signature:
+            return False
+
+        self._city_value_signatures[path] = signature
+        self._record_city_update(
+            path=path,
+            kind="state_change",
+            value=value,
+            observed_at=observed_at,
+        )
+        return True
+
+    def _record_city_update(self, path: str, kind: str, value: Any, observed_at: str) -> None:
+        self.city_updates.appendleft(
+            {
+                "observed_at": observed_at,
+                "path": path,
+                "kind": kind,
+                "value": deepcopy(value),
+            }
+        )
+
+    def _is_collection_container(self, value: dict[str, Any]) -> bool:
+        if not value:
+            return False
+
+        values = list(value.values())
+        if any(isinstance(item, list) for item in values):
+            return True
+        return all(isinstance(item, dict) for item in values)
+
+    def _fingerprint(self, value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+    def _append_city_receive_log_entry(self, entry: dict[str, Any]) -> None:
+        self.city_receive_log_entries.appendleft(entry)
+
+    def _rewrite_city_receive_log(self) -> None:
+        if self.city_receive_log_path is None:
+            return
+
+        self.city_receive_log_path.parent.mkdir(parents=True, exist_ok=True)
+        content = self._render_city_receive_log()
+        self.city_receive_log_path.write_text(content, encoding="utf-8")
+
+    def _render_city_receive_log(self) -> str:
+        if not self.city_receive_log_entries:
+            return "No city receptions yet.\n"
+
+        blocks = [self._format_city_receive_log_entry(entry) for entry in self.city_receive_log_entries]
+        return "\n\n".join(blocks) + "\n"
+
+    def _format_city_receive_log_entry(self, entry: dict[str, Any]) -> str:
+        lines = [
+            f"time: {entry['observed_at']}",
+            f"kind: {entry['kind']}",
+        ]
+
+        if entry["kind"] == "error":
+            lines.append(f"error: {entry['error']}")
+            return "\n".join(lines)
+
+        summary = entry.get("summary", {})
+        lines.append(f"bus_records: {summary.get('bus_records', 0)}")
+        lines.append(
+            "collection_sizes: "
+            + json.dumps(summary.get("collection_sizes", {}), ensure_ascii=False, sort_keys=True)
+        )
+        lines.append(f"updates_count: {entry.get('updates_count', 0)}")
+
+        for update in entry.get("update_preview", []):
+            update_value = json.dumps(update.get("value"), ensure_ascii=False, sort_keys=True)
+            lines.append(
+                "update: "
+                f"{update.get('path') or '/'} [{update.get('kind', 'update')}] {update_value}"
+            )
+
+        return "\n".join(lines)
 
     def _build_navigation_points(self, scenario: Any) -> list[dict[str, Any]]:
         scenario_data = scenario if isinstance(scenario, dict) else {}
@@ -587,6 +872,39 @@ class LocalState:
             current_start_id = target_point_id
         return segments
 
+    def _collapse_route_segments(
+        self,
+        segments: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        collapsed: list[dict[str, Any]] = []
+        for segment in segments:
+            normalized_segment = {
+                "from_point_id": segment["from_point_id"],
+                "to_point_id": segment["to_point_id"],
+                "connection_type": segment["connection_type"],
+            }
+            via_point_ids = list(segment.get("via_point_ids") or [])
+            if via_point_ids:
+                normalized_segment["via_point_ids"] = via_point_ids
+
+            if (
+                collapsed
+                and normalized_segment["connection_type"] == "bus"
+                and collapsed[-1]["connection_type"] == "bus"
+                and collapsed[-1]["to_point_id"] == normalized_segment["from_point_id"]
+            ):
+                merged_via_point_ids = list(collapsed[-1].get("via_point_ids") or [])
+                merged_via_point_ids.append(collapsed[-1]["to_point_id"])
+                merged_via_point_ids.extend(via_point_ids)
+                collapsed[-1]["to_point_id"] = normalized_segment["to_point_id"]
+                if merged_via_point_ids:
+                    collapsed[-1]["via_point_ids"] = merged_via_point_ids
+                continue
+
+            collapsed.append(normalized_segment)
+
+        return collapsed
+
     def _build_graph_route(
         self,
         start_point_id: str,
@@ -716,9 +1034,17 @@ class LocalState:
             self.navigation_state["status"] = "completed"
             self.navigation_state["current_route_index"] = None
             self.navigation_state["completed_at"] = _now_iso()
-            message = (
-                f"{current_point['name']} подтверждена через {source}. "
-                f"Маршрут завершён, пользователь прибыл в {self._spoken_point_name(current_point)}."
+            base_message = self._compose_voice_message(
+                f"{current_point['name']} подтверждена через {source}.",
+                f"Маршрут завершён, вы на месте: {self._spoken_point_name(current_point)}.",
+            )
+            message = self._refine_voice_text(
+                base_message,
+                intent="navigation_completed",
+                context={
+                    "point_id": current_point["point_id"],
+                    "source": source,
+                },
             )
             self.navigation_state["message"] = message
             self._append_navigation_log(
@@ -735,9 +1061,17 @@ class LocalState:
         next_point = self.navigation_points_by_id[next_segment["to_point_id"]]
         self.navigation_state["current_route_index"] = next_index
         self.navigation_state["status"] = "awaiting_confirmation"
-        self.navigation_state["message"] = (
-            f"{current_point['name']} подтверждена через {source}. "
-            f"{self._build_step_prompt(next_segment)}"
+        self.navigation_state["message"] = self._refine_voice_text(
+            self._compose_voice_message(
+                f"{current_point['name']} подтверждена через {source}.",
+                self._build_step_prompt(next_segment, lead="Дальше"),
+            ),
+            intent="navigation_advance",
+            context={
+                "confirmed_point_id": current_point["point_id"],
+                "next_point_id": next_point["point_id"],
+                "source": source,
+            },
         )
         self._append_navigation_log(
             "advance",
@@ -760,7 +1094,11 @@ class LocalState:
         current_index = self.navigation_state["current_route_index"]
         route_segments = self.navigation_state["route_segments"]
         remaining_segments = route_segments[current_index:] if current_index is not None else route_segments
-        remaining_point_ids = {segment["to_point_id"] for segment in remaining_segments}
+        remaining_point_ids = {
+            point_id
+            for segment in remaining_segments
+            for point_id in self._segment_point_ids(segment)
+        }
         if blocked_point_id not in remaining_point_ids:
             return []
 
@@ -784,9 +1122,16 @@ class LocalState:
                 blocked_point_ids=blocked_point_ids,
             )
         except ValueError:
-            message = (
-                f"На маршруте обнаружено препятствие в {blocked_point_id}. "
-                "Перестроить маршрут не удалось."
+            message = self._refine_voice_text(
+                self._compose_voice_message(
+                    f"На пути обнаружено препятствие у {self._point_name_or_id(blocked_point_id)}.",
+                    "Сейчас не удалось подобрать безопасный обходной маршрут.",
+                ),
+                intent="navigation_reroute_failed",
+                context={
+                    "blocked_point_id": blocked_point_id,
+                    "location_id": event.location_id,
+                },
             )
             self.navigation_state["active"] = False
             self.navigation_state["status"] = "blocked"
@@ -813,7 +1158,14 @@ class LocalState:
         self.navigation_state["active"] = bool(rerouted_segments)
 
         if not rerouted_segments:
-            message = "Маршрут завершён после перестроения."
+            message = self._refine_voice_text(
+                "Маршрут после перестроения уже завершён.",
+                intent="navigation_reroute_completed",
+                context={
+                    "blocked_point_id": blocked_point_id,
+                    "location_id": event.location_id,
+                },
+            )
             self.navigation_state["message"] = message
             self.navigation_state["completed_at"] = _now_iso()
             self._append_navigation_log(
@@ -826,10 +1178,19 @@ class LocalState:
             return [self._voice_event(message)]
 
         next_point = self.navigation_points_by_id[rerouted_segments[0]["to_point_id"]]
-        message = (
-            f"Маршрут перестроен из-за препятствия в {blocked_point_id}. "
-            f"Новый путь: {self._format_route_sequence(rerouted_segments)}. "
-            f"{self._build_step_prompt(rerouted_segments[0])}"
+        message = self._refine_voice_text(
+            self._compose_voice_message(
+                f"На пути обнаружено препятствие у {self._point_name_or_id(blocked_point_id)}.",
+                f"Я перестроил маршрут. Новый путь: {self._format_route_sequence(rerouted_segments)}.",
+                self._build_step_prompt(rerouted_segments[0], lead="Теперь"),
+            ),
+            intent="navigation_reroute",
+            context={
+                "blocked_point_id": blocked_point_id,
+                "location_id": event.location_id,
+                "route": [segment["to_point_id"] for segment in rerouted_segments],
+                "next_point_id": next_point["point_id"],
+            },
         )
         self.navigation_state["message"] = message
         self._append_navigation_log(
@@ -857,6 +1218,9 @@ class LocalState:
         if current_segment is None:
             return None
         return self.navigation_points_by_id.get(current_segment["to_point_id"])
+
+    def _segment_point_ids(self, segment: dict[str, Any]) -> list[str]:
+        return [*list(segment.get("via_point_ids") or []), segment["to_point_id"]]
 
     def _is_matching_confirmation(
         self,
@@ -915,19 +1279,72 @@ class LocalState:
         normalized = text if len(text) <= 200 else f"{text[:197].rstrip()}..."
         return VoiceEvent(type=1, text=normalized, timestamp=_now_unix())
 
+    def _refine_voice_text(
+        self,
+        draft_text: str,
+        *,
+        intent: str,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        service = self.text_generation_service
+        if service is None:
+            return draft_text
+        try:
+            return service.rewrite_text(draft_text, intent=intent, context=context or {})
+        except Exception:
+            return draft_text
+
+    def _compose_voice_message(self, *parts: str | None) -> str:
+        return " ".join(part.strip() for part in parts if part and part.strip())
+
+    def _service_intro(
+        self,
+        service: dict[str, Any] | None,
+        ticket_number: str | None,
+    ) -> str:
+        if not service or not ticket_number:
+            return ""
+        return f"Услуга «{service['service_name']}», талон {ticket_number}."
+
+    def _build_waypoint_notice(self, waypoint_point_ids: list[str]) -> str:
+        if not waypoint_point_ids:
+            return ""
+        return f"По пути заглянем в {self._format_point_list(waypoint_point_ids)}."
+
+    def _format_point_list(self, point_ids: list[str]) -> str:
+        point_names = [
+            self.navigation_points_by_id[point_id]["name"]
+            for point_id in point_ids
+            if point_id in self.navigation_points_by_id
+        ]
+        if not point_names:
+            return ""
+        if len(point_names) == 1:
+            return point_names[0]
+        if len(point_names) == 2:
+            return f"{point_names[0]} и {point_names[1]}"
+        return f"{', '.join(point_names[:-1])} и {point_names[-1]}"
+
+    def _point_name_or_id(self, point_id: str) -> str:
+        point = self.navigation_points_by_id.get(point_id)
+        return point["name"] if point else point_id
+
     def _navigation_snapshot(self) -> dict[str, Any]:
         current_segment = self._current_navigation_segment()
         current_point = self._current_navigation_point()
         confirmed_point_ids = set(self.navigation_state["confirmed_point_ids"])
         route_segments = self.navigation_state["route_segments"]
+        display_route_segments = self._collapse_route_segments(route_segments)
 
         route: list[dict[str, Any]] = []
-        for index, segment in enumerate(route_segments):
-            point_id = segment["to_point_id"]
+        for segment in display_route_segments:
+            segment_point_ids = self._segment_point_ids(segment)
             status = "pending"
-            if point_id in confirmed_point_ids:
+            if segment_point_ids and all(
+                point_id in confirmed_point_ids for point_id in segment_point_ids
+            ):
                 status = "confirmed"
-            elif current_segment and index == self.navigation_state["current_route_index"]:
+            elif current_segment and current_segment["to_point_id"] in segment_point_ids:
                 status = "active"
 
             route.append(
@@ -939,6 +1356,7 @@ class LocalState:
                     "to_point": self._serialize_navigation_point(
                         self.navigation_points_by_id.get(segment["to_point_id"])
                     ),
+                    "via_point_ids": list(segment.get("via_point_ids") or []),
                     "connection_type_label": self._connection_type_label(segment["connection_type"]),
                     "instruction": self._format_route_segment(segment),
                     "status": status,
@@ -966,6 +1384,7 @@ class LocalState:
                         self.navigation_points_by_id.get(current_segment["from_point_id"])
                     ),
                     "to_point": self._serialize_navigation_point(current_point),
+                    "via_point_ids": list(current_segment.get("via_point_ids") or []),
                     "connection_type_label": self._connection_type_label(
                         current_segment["connection_type"]
                     ),
@@ -1039,23 +1458,21 @@ class LocalState:
             "confirmation_methods": methods,
         }
 
-    def _build_step_prompt(self, segment: dict[str, str]) -> str:
+    def _build_step_prompt(self, segment: dict[str, str], lead: str = "Дальше") -> str:
         to_point = self.navigation_points_by_id[segment["to_point_id"]]
-        prompt = (
-            f"Следующий шаг: {self._connection_type_spoken(segment['connection_type'])} "
-            f"до {self._spoken_point_name(to_point)}."
-        )
+        prompt = f"{lead} двигайтесь {self._format_route_segment(segment, short=True)}."
         if to_point.get("device_id") is not None:
             if to_point.get("device_type") == "type2" and to_point.get("color"):
-                prompt += f" Ориентир: цветовая подсветка точки {to_point['name']}."
+                prompt += f" Ориентир: подсветка точки {to_point['name']}."
             else:
                 prompt += f" Ориентир: звуковой сигнал точки {to_point['name']}."
         return prompt
 
     def _format_route_sequence(self, route_segments: list[dict[str, str]]) -> str:
+        display_segments = self._collapse_route_segments(route_segments)
         return ", затем ".join(
             self._format_route_segment(segment, short=True)
-            for segment in route_segments
+            for segment in display_segments
         )
 
     def _format_route_segment(self, segment: dict[str, str], short: bool = False) -> str:
@@ -1063,6 +1480,8 @@ class LocalState:
         to_point = self.navigation_points_by_id[segment["to_point_id"]]
         spoken = self._connection_type_spoken(segment["connection_type"])
         if short:
+            if segment["connection_type"] == "bus" and segment.get("via_point_ids"):
+                return f"{spoken} по кольцу до {self._spoken_point_name(to_point)}"
             return f"{spoken} до {self._spoken_point_name(to_point)}"
         return (
             f"{self._connection_type_label(segment['connection_type'])}: "

@@ -6,9 +6,17 @@ import re
 import threading
 import wave
 from pathlib import Path
+from typing import Any
 
-from piper import PiperVoice
-from piper.config import SynthesisConfig
+try:
+    from piper import PiperVoice
+    from piper.config import SynthesisConfig
+except ModuleNotFoundError as exc:
+    PiperVoice = None
+    SynthesisConfig = None
+    PIPER_IMPORT_ERROR = exc
+else:
+    PIPER_IMPORT_ERROR = None
 
 from app.config import Settings
 
@@ -36,24 +44,29 @@ class NeuralTtsService:
         self.volume = settings.tts_volume
         self.sentence_pause_seconds = settings.tts_sentence_pause_seconds
 
-        self._voice: PiperVoice | None = None
+        self._voice: Any | None = None
         self._lock = threading.Lock()
 
+    def readiness_error(self) -> str | None:
+        if not self.enabled:
+            return "Нейросетевая озвучка отключена в настройках."
+        if PIPER_IMPORT_ERROR is not None:
+            return "Для текущего Python не установлен пакет piper-tts."
+        if not self.model_path.exists():
+            return f"Не найдена TTS-модель: {self.model_path}."
+        if not self.config_path.exists():
+            return f"Не найден конфиг TTS-модели: {self.config_path}."
+        return None
+
     def is_ready(self) -> bool:
-        return (
-            self.enabled
-            and self.model_path.exists()
-            and self.config_path.exists()
-        )
+        return self.readiness_error() is None
 
     def synthesize_bytes(self, text: str) -> bytes:
         cleaned_text = self._normalize_text(text)
         if not cleaned_text:
             raise ValueError("Для озвучки нужен непустой текст.")
-        if not self.is_ready():
-            raise FileNotFoundError(
-                f"Не найдена TTS-модель: {self.model_path}."
-            )
+
+        self._ensure_ready()
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = self.cache_dir / f"{self._cache_key(cleaned_text)}.wav"
@@ -69,7 +82,20 @@ class NeuralTtsService:
             cache_path.write_bytes(wav_bytes)
             return wav_bytes
 
-    def _load_voice(self) -> PiperVoice:
+    def _ensure_ready(self) -> None:
+        if not self.enabled:
+            raise RuntimeError("Нейросетевая озвучка отключена в настройках.")
+        if PIPER_IMPORT_ERROR is not None:
+            raise ModuleNotFoundError(
+                "Для текущего Python не установлен пакет piper-tts."
+            ) from PIPER_IMPORT_ERROR
+        if not self.model_path.exists():
+            raise FileNotFoundError(f"Не найдена TTS-модель: {self.model_path}.")
+        if not self.config_path.exists():
+            raise FileNotFoundError(f"Не найден конфиг TTS-модели: {self.config_path}.")
+
+    def _load_voice(self) -> Any:
+        self._ensure_ready()
         if self._voice is None:
             self._voice = PiperVoice.load(
                 self.model_path,
@@ -78,7 +104,7 @@ class NeuralTtsService:
             )
         return self._voice
 
-    def _render_wav_bytes(self, voice: PiperVoice, text: str) -> bytes:
+    def _render_wav_bytes(self, voice: Any, text: str) -> bytes:
         syn_config = SynthesisConfig(
             length_scale=self.length_scale,
             noise_scale=self.noise_scale,

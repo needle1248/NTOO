@@ -1,5 +1,7 @@
 import asyncio
 import os
+import tempfile
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -10,6 +12,11 @@ from app.services.local_state import LocalState
 
 def build_client():
     os.environ["ENABLE_CITY_POLLING"] = "false"
+    os.environ["TTS_ENABLED"] = "false"
+    os.environ["TEXT_GENERATION_ENABLED"] = "false"
+    os.environ["CITY_RECEIVE_LOG_PATH"] = str(
+        Path(tempfile.mkdtemp(prefix="ntoo-city-log-")) / "city-receive-log.txt"
+    )
     get_settings.cache_clear()
     app = create_app()
     sent_events = []
@@ -55,7 +62,103 @@ def test_environment_creates_clothing_recommendation():
         assert response.status_code == 200
         data = response.json()
         assert data["recommendation"]["mode"] == "cold"
-        assert "тёплая куртка" in data["recommendation"]["text"]
+        assert "тёплую куртку" in data["recommendation"]["text"]
+        assert data["recommendation"]["temperature_c"] == 2
+
+
+def test_city_state_collection_tracks_snapshots_and_feed():
+    app, _, _ = build_client()
+    payload = {
+        "voice_queue": [{"text": "city says hello", "ts": 10}],
+        "devices_type1": {
+            "5": {
+                "duration_ms": 1000,
+                "frequency_hz": 300,
+                "ts": 10,
+            }
+        },
+        "devices_type2": {
+            "33": {
+                "color": {"r": 255, "g": 120, "b": 0},
+                "ts": 10,
+            }
+        },
+        "buses": {
+            "1": {
+                "current_stop": 12,
+                "timestamp": 1234567890,
+            }
+        },
+        "events": {
+            "rfid": [{"device_id": 5, "rfid_code": "ABC123", "ts": 10}],
+            "face": [{"device_id": 5, "user_id": "SpiderMan", "confidence": 0.95, "ts": 10}],
+        },
+        "obstacles": [
+            {
+                "location_id": 12,
+                "obstacle_type": "construction",
+                "reroute_required": True,
+                "message": "Go around on the right",
+                "ts": 10,
+            }
+        ],
+    }
+
+    with TestClient(app) as client:
+        asyncio.run(client.app.state.local_state.refresh_city_state(payload))
+
+        state = client.get("/api/state").json()
+        assert state["city"]["collector"]["snapshots_seen"] == 1
+        assert state["city"]["collector"]["updates_seen"] >= 6
+        assert any(item["path"] == "voice_queue" for item in state["city_updates_preview"])
+
+        raw = client.get("/api/city/raw?snapshots=3").json()
+        assert raw["raw"]["events"]["rfid"][0]["rfid_code"] == "ABC123"
+        assert raw["snapshots"][0]["summary"]["bus_records"] == 1
+
+        feed = client.get("/api/city/feed?limit=50").json()
+        assert feed["collector"]["updates_seen"] >= 6
+        assert any(item["path"] == "devices_type1.5" for item in feed["updates"])
+        assert any(item["path"] == "events.face" and item["kind"] == "list_item" for item in feed["updates"])
+        assert feed["collector"]["receive_log_entries"] == 1
+
+        log_path = client.app.state.local_state.city_receive_log_path
+        assert log_path is not None
+        log_text = log_path.read_text(encoding="utf-8")
+        assert "kind: snapshot" in log_text
+        assert "updates_count:" in log_text
+        assert "voice_queue" in log_text
+
+
+def test_repeated_city_snapshot_does_not_duplicate_updates():
+    app, _, _ = build_client()
+    payload = {
+        "voice_queue": [{"text": "once", "ts": 99}],
+        "devices_type1": {"5": {"duration_ms": 500, "frequency_hz": 100, "ts": 99}},
+    }
+
+    with TestClient(app) as client:
+        asyncio.run(client.app.state.local_state.refresh_city_state(payload))
+        first = client.get("/api/city/feed?limit=50").json()
+
+        asyncio.run(client.app.state.local_state.refresh_city_state(payload))
+        second = client.get("/api/city/feed?limit=50").json()
+
+        assert first["collector"]["updates_seen"] == second["collector"]["updates_seen"]
+        assert second["collector"]["snapshots_seen"] == 2
+
+
+def test_city_receive_log_records_errors():
+    app, _, _ = build_client()
+
+    with TestClient(app) as client:
+        asyncio.run(client.app.state.local_state.mark_city_error("timeout"))
+
+        log_path = client.app.state.local_state.city_receive_log_path
+        assert log_path is not None
+        log_text = log_path.read_text(encoding="utf-8")
+        assert "kind: error" in log_text
+        assert "timeout" in log_text
 
 
 def test_navigation_start_dispatches_voice_and_first_sound():
@@ -87,8 +190,9 @@ def test_navigation_start_dispatches_voice_and_first_sound():
         assert data["navigation"]["route"][0]["connection_type_label"] == "Пешая связь"
 
         assert sent_events[0]["type"] == 1
-        assert "Маршрут до точки 7 построен." in sent_events[0]["text"]
-        assert "Маршрут: пешком до точки 10" in sent_events[0]["text"]
+        assert "Маршрут до точки 7 готов." in sent_events[0]["text"]
+        assert "Стартуем от Точка 1." in sent_events[0]["text"]
+        assert "Сначала двигайтесь пешком до точки 10." in sent_events[0]["text"]
         assert sent_events[1] == {
             "type": 2,
             "device_id": 10,
@@ -135,7 +239,7 @@ def test_navigation_advances_on_rfid_and_face_confirmation():
         ]
 
         assert sent_events[3]["type"] == 1
-        assert "пешком до точки 9" in sent_events[3]["text"]
+        assert "Дальше двигайтесь пешком до точки 9." in sent_events[3]["text"]
         assert sent_events[4]["type"] == 2
         assert sent_events[4]["device_id"] == 9
         assert sent_events[6]["type"] == 1
@@ -165,6 +269,99 @@ def test_navigation_crosswalks_only_use_local_team_stops():
         assert {"to_point_id": "point-34", "connection_type": "crosswalk"} not in graph["point-30"]
 
 
+def test_navigation_collapses_bus_ring_into_single_route_step():
+    app, fake_send_event, _ = build_client()
+    with TestClient(app) as client:
+        client.app.state.city_client.send_event = fake_send_event
+        response = client.post(
+            "/api/navigation/start",
+            json={"start_point_id": "point-9", "destination_point_id": "point-16"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        assert [step["to_point"]["point_id"] for step in data["navigation"]["route"]] == [
+            "point-14",
+            "point-16",
+        ]
+        assert data["navigation"]["route"][1]["connection_type"] == "bus"
+        assert data["navigation"]["route"][1]["via_point_ids"] == ["point-15"]
+        assert "по кольцу" in data["navigation"]["route_text"]
+
+
+def test_navigation_keeps_bus_ring_progression_between_hidden_stops():
+    app, fake_send_event, sent_events = build_client()
+    with TestClient(app) as client:
+        client.app.state.city_client.send_event = fake_send_event
+        start_response = client.post(
+            "/api/navigation/start",
+            json={"start_point_id": "point-9", "destination_point_id": "point-16"},
+        )
+        assert start_response.status_code == 200
+
+        confirm_response = client.post(
+            "/api/events",
+            json={"type": 4, "device_id": 14, "rfid_code": "ring-card"},
+        )
+        assert confirm_response.status_code == 200
+        data = confirm_response.json()
+        assert len(data["followups"]) == 2
+        assert data["followups"][1]["event"]["type"] == 2
+        assert data["followups"][1]["event"]["device_id"] == 15
+
+        state = client.get("/api/state").json()
+        assert state["navigation"]["current_point"]["point_id"] == "point-15"
+        assert [step["to_point"]["point_id"] for step in state["navigation"]["route"]] == [
+            "point-14",
+            "point-16",
+        ]
+        assert state["navigation"]["route"][1]["status"] == "active"
+
+        assert sent_events[-2]["type"] == 1
+        assert "до точки 15" in sent_events[-2]["text"]
+        assert sent_events[-1]["type"] == 2
+        assert sent_events[-1]["device_id"] == 15
+
+
+def test_navigation_reroutes_when_obstacle_hits_collapsed_bus_segment():
+    app, fake_send_event, _ = build_client()
+    with TestClient(app) as client:
+        client.app.state.city_client.send_event = fake_send_event
+
+        start_response = client.post(
+            "/api/navigation/start",
+            json={"start_point_id": "point-9", "destination_point_id": "point-16"},
+        )
+        assert start_response.status_code == 200
+        start_data = start_response.json()
+        assert start_data["navigation"]["route"][1]["via_point_ids"] == ["point-15"]
+
+        obstacle_response = client.post(
+            "/api/events",
+            json={
+                "type": 5,
+                "location_id": 15,
+                "obstacle_type": "construction",
+                "reroute_required": True,
+                "message": "Blocked bus stop",
+            },
+        )
+        assert obstacle_response.status_code == 200
+        data = obstacle_response.json()
+        assert len(data["followups"]) == 2
+        assert data["followups"][1]["event"]["type"] == 2
+        assert data["followups"][1]["event"]["device_id"] == 10
+
+        state = client.get("/api/state").json()
+        assert [step["to_point"]["point_id"] for step in state["navigation"]["route"]] == [
+            "point-10",
+            "point-13",
+            "point-16",
+        ]
+        assert state["navigation"]["route"][2]["via_point_ids"] == ["point-17"]
+        assert [point["point_id"] for point in state["navigation"]["blocked_points"]] == ["point-15"]
+
+
 def test_navigation_supports_multiple_waypoints():
     app, fake_send_event, _ = build_client()
     with TestClient(app) as client:
@@ -190,6 +387,28 @@ def test_navigation_supports_multiple_waypoints():
             "point-11",
             "point-7",
         ]
+
+
+def test_navigation_excludes_start_and_destination_from_waypoints():
+    app, fake_send_event, _ = build_client()
+    with TestClient(app) as client:
+        client.app.state.city_client.send_event = fake_send_event
+        response = client.post(
+            "/api/navigation/start",
+            json={
+                "start_point_id": "point-1",
+                "destination_point_id": "point-7",
+                "waypoint_point_ids": ["point-1", "point-12", "point-7"],
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        assert [point["point_id"] for point in data["navigation"]["waypoints"]] == ["point-12"]
+        assert all(
+            point["point_id"] not in {"point-1", "point-7"}
+            for point in data["navigation"]["waypoints"]
+        )
 
 
 def test_navigation_reroutes_when_obstacle_blocks_active_path():

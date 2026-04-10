@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ settings.app_name }}</title>
-    <link rel="stylesheet" href="/static/css/styles.css" />
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260409-ui-refresh-4" />
   </head>
   <body>
     <main class="page">
@@ -120,11 +120,10 @@
           <div class="grid-2">
             <div>
               <h3>Промежуточные точки</h3>
-              <input
-                id="navigationWaypoints"
-                name="waypoint_point_ids"
-                placeholder="Например: point-10, point-18"
-              />
+              <div id="navigationWaypoints" class="waypoint-picker"></div>
+              <p id="navigationWaypointsHint" class="muted">
+                Выберите точки, через которые маршрут должен пройти по пути.
+              </p>
             </div>
             <div>
               <h3>Услуга МФЦ</h3>
@@ -132,10 +131,14 @@
             </div>
           </div>
           <p class="muted">
-            Для сценариев с несколькими этапами можно указать любое число промежуточных точек через запятую.
+            Стартовая и конечная точки автоматически исключаются из списка промежуточных.
             Если выбрана услуга МФЦ, сервер построит маршрут до связанной с ней точки обслуживания.
           </p>
+          <p id="navigationDraftSummary" class="route-draft-summary">
+            Р¤РѕСЂРјР° РјР°СЂС€СЂСѓС‚Р° РіРѕС‚РѕРІР° Рє РІС‹Р±РѕСЂСѓ С‚РѕС‡РµРє.
+          </p>
           <div class="route-actions">
+            <button type="button" class="action-btn secondary-btn" id="resetNavigationForm">Сбросить форму</button>
             <button type="submit">Построить маршрут</button>
             <button type="button" class="action-btn secondary-btn" id="toggleRouteSpeech">
               Озвучка маршрута: вкл
@@ -296,6 +299,10 @@
           <div id="voiceQueue" class="stack-list"></div>
         </article>
         <article class="card">
+          <h2>Лента города</h2>
+          <div id="cityUpdates" class="stack-list"></div>
+        </article>
+        <article class="card">
           <h2>Журнал</h2>
           <div id="logs" class="stack-list"></div>
         </article>
@@ -305,6 +312,6 @@
     <script>
       window.__TEAM_PROFILE__ = {{ team | tojson }};
     </script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=20260409-ui-refresh-4"></script>
   </body>
 </html>

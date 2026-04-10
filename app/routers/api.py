@@ -62,9 +62,19 @@ async def get_state(request: Request) -> dict[str, Any]:
 
 
 @router.get("/city/raw")
-async def get_raw_city_state(request: Request) -> dict[str, Any]:
-    raw = await request.app.state.local_state.raw_city_state()
-    return {"raw": raw}
+async def get_raw_city_state(
+    request: Request,
+    snapshots: int = Query(default=5, ge=1, le=25),
+) -> dict[str, Any]:
+    return await request.app.state.local_state.raw_city_state(snapshot_limit=snapshots)
+
+
+@router.get("/city/feed")
+async def get_city_feed(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=400),
+) -> dict[str, Any]:
+    return await request.app.state.local_state.city_feed(limit=limit)
 
 
 @router.post("/events")
@@ -147,6 +157,17 @@ async def announce_recommendation(
         raise HTTPException(status_code=400, detail="Нет данных для озвучивания.")
 
     text = recommendation["text"]
+    text_generation_service = getattr(request.app.state, "text_generation_service", None)
+    if text_generation_service is not None:
+        text = await asyncio.to_thread(
+            text_generation_service.rewrite_text,
+            text,
+            intent="recommendation_announce",
+            context={
+                "kind": body.kind,
+                "recommendation": recommendation,
+            },
+        )
     event = VoiceEvent(type=1, text=text)
     dispatched = await _dispatch_event_chain(request, [event])
     return dispatched[0]
@@ -159,12 +180,17 @@ async def synthesize_speech(
 ) -> Response:
     tts_service = request.app.state.tts_service
     if not tts_service.is_ready():
-        raise HTTPException(status_code=503, detail="Нейросетевая озвучка недоступна.")
+        raise HTTPException(
+            status_code=503,
+            detail=tts_service.readiness_error() or "Нейросетевая озвучка недоступна.",
+        )
 
     try:
         wav_bytes = await asyncio.to_thread(tts_service.synthesize_bytes, body.text)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ModuleNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

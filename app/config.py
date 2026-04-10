@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     city_poll_interval_seconds: float = 2.0
     city_request_timeout_seconds: float = 5.0
     enable_city_polling: bool = True
+    city_receive_log_path: str = "logs/city-receive-log.txt"
+    city_receive_log_entries_limit: int = 20
+    city_receive_log_updates_preview_limit: int = 8
 
     team_id: int = 1
     team_name: str = "Команда 1"
@@ -35,6 +38,14 @@ class Settings(BaseSettings):
     tts_noise_w_scale: float = 0.8
     tts_volume: float = 0.92
     tts_sentence_pause_seconds: float = 0.16
+    text_generation_enabled: bool = True
+    text_generation_model_id: str = "Qwen/Qwen2.5-0.5B-Instruct"
+    text_generation_model_path: str = "models/text/qwen2.5-0.5b-instruct"
+    text_generation_cache_dir: str = ".cache/text-generation"
+    text_generation_max_new_tokens: int = 80
+    text_generation_temperature: float = 0.35
+    text_generation_top_p: float = 0.9
+    text_generation_repetition_penalty: float = 1.05
 
     model_config = SettingsConfigDict(
         env_file=".env",

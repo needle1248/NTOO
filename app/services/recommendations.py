@@ -13,18 +13,21 @@ def build_clothing_recommendation(environment: dict[str, Any] | None) -> dict[st
 
     if temperature < 10:
         mode = "cold"
-        text = "Холодно: тёплая куртка, шапка и закрытая обувь."
+        text = "На улице прохладно: лучше надеть тёплую куртку, шапку и закрытую обувь."
     elif temperature > 24:
         mode = "hot"
-        text = "Жарко: лёгкая одежда, головной убор и вода."
+        text = (
+            "Снаружи жарко, поэтому лучше выбрать лёгкую одежду, взять воду "
+            "и не забыть про головной убор."
+        )
     else:
         mode = "normal"
-        text = "Нормально: лёгкая куртка или свитер по погоде."
+        text = "Погода комфортная: подойдёт лёгкая куртка или свитер по сезону."
 
     if humidity > 80:
-        text += " Влажность высокая, стоит взять непромокаемую верхнюю одежду."
+        text += " Влажность высокая, так что непромокаемая верхняя одежда точно не будет лишней."
     if pressure < 990:
-        text += " Давление понижено, лучше избегать перегрузки и выйти чуть заранее."
+        text += " Давление понижено, поэтому лучше не спешить и выйти немного заранее."
 
     return {
         "mode": mode,
@@ -47,7 +50,7 @@ def build_traffic_recommendation(
     if not delayed:
         return {
             "delayed": False,
-            "text": "Существенных задержек автобуса сейчас не наблюдается.",
+            "text": "Сейчас автобус идёт без заметных задержек, можно ориентироваться на обычное время в пути.",
             "best_eta_seconds": round(best_eta_seconds, 1),
             "baseline_eta_seconds": round(baseline_eta_seconds, 1),
         }
@@ -55,8 +58,8 @@ def build_traffic_recommendation(
     return {
         "delayed": True,
         "text": (
-            "На вашем кольце образовалась пробка, рекомендуем временно "
-            "воздержаться от поездок и остаться дома."
+            "На маршруте сейчас заметная задержка. Если поездка не срочная, "
+            "лучше заложить дополнительное время или немного подождать."
         ),
         "best_eta_seconds": round(best_eta_seconds, 1),
         "baseline_eta_seconds": round(baseline_eta_seconds, 1),
@@ -69,11 +72,10 @@ def build_obstacle_recommendation(obstacles: list[dict[str, Any]]) -> dict[str, 
 
     latest = obstacles[0]
     message = latest.get("message") or (
-        f"На маршруте обнаружено препятствие типа {latest.get('obstacle_type', 'unknown')}."
+        f"На маршруте замечено препятствие типа {latest.get('obstacle_type', 'unknown')}."
     )
     return {
         "text": message,
         "location_id": latest.get("location_id"),
         "reroute_required": bool(latest.get("reroute_required")),
     }
-

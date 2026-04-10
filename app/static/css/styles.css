@@ -250,6 +250,45 @@ textarea {
   width: auto;
 }
 
+.waypoint-picker {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.waypoint-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--line);
+}
+
+.waypoint-option input {
+  width: auto;
+  margin-top: 2px;
+}
+
+.waypoint-option strong,
+.waypoint-option .small {
+  display: block;
+}
+
+.waypoint-option .small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.waypoint-option--empty {
+  padding: 12px 14px;
+  border-style: dashed;
+  color: var(--muted);
+}
+
 .recommendations {
   display: grid;
   gap: 16px;
@@ -257,6 +296,15 @@ textarea {
 
 .route-card {
   margin-top: 18px;
+}
+
+.route-draft-summary {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(0, 95, 115, 0.08);
+  border: 1px solid rgba(0, 95, 115, 0.14);
+  color: var(--secondary);
 }
 
 .route-actions {
