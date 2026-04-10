@@ -21,15 +21,15 @@
       { "point_id": "point-3", "name": "Точка 3", "device_id": 3 },
       { "point_id": "point-4", "name": "Точка 4", "device_id": 4 },
       { "point_id": "point-5", "name": "Точка 5", "device_id": 5 },
-      { "point_id": "point-6", "name": "Точка 6", "device_id": 6 },
+      { "point_id": "point-6", "name": "Точка 6", "device_id": 103, "frequency_hz": 1500, "confirmation": { "rfid_device_id": 103, "face_device_id": 3 } },
       { "point_id": "point-7", "name": "Точка 7", "device_id": 7 },
-      { "point_id": "point-8", "name": "Точка 8", "device_id": 8 },
-      { "point_id": "point-9", "name": "Точка 9", "device_id": 9 },
+      { "point_id": "point-8", "name": "Точка 8", "device_id": 104, "frequency_hz": 1900, "confirmation": { "rfid_device_id": 104, "face_device_id": 4 } },
+      { "point_id": "point-9", "name": "Точка 9", "device_id": 102, "frequency_hz": 1100, "confirmation": { "rfid_device_id": 102, "face_device_id": 2 } },
       { "point_id": "point-10", "name": "Точка 10", "device_id": 10 },
       { "point_id": "point-11", "name": "Точка 11", "device_id": 11 },
       { "point_id": "point-12", "name": "Точка 12", "device_id": 12 },
       { "point_id": "point-13", "name": "Точка 13", "device_id": 13 },
-      { "point_id": "point-14", "name": "Точка 14", "device_id": 14 },
+      { "point_id": "point-14", "name": "Точка 14", "device_id": 101, "frequency_hz": 700, "confirmation": { "rfid_device_id": 101, "face_device_id": 1 } },
       { "point_id": "point-15", "name": "Точка 15", "device_id": 15 },
       { "point_id": "point-16", "name": "Точка 16", "device_id": 16 },
       { "point_id": "point-17", "name": "Точка 17", "device_id": 17 },
@@ -48,8 +48,8 @@
       { "point_id": "point-30", "name": "Точка 30", "device_id": 30 },
       { "point_id": "point-31", "name": "Точка 31", "device_id": 31 },
       { "point_id": "point-32", "name": "Точка 32", "device_id": 32 },
-      { "point_id": "point-33", "name": "Точка 33", "device_id": 33 },
-      { "point_id": "point-34", "name": "Точка 34", "device_id": 34 }
+      { "point_id": "point-41", "name": "Точка 41", "device_id": 41 },
+      { "point_id": "point-42", "name": "Точка 42", "device_id": 42 }
     ],
     "edges": [
       { "from": "point-1", "to": "point-10", "connection_type": "walk" },
@@ -101,8 +101,8 @@
 
       { "from": "point-31", "to": "point-20", "connection_type": "crosswalk" },
       { "from": "point-32", "to": "point-19", "connection_type": "crosswalk" },
-      { "from": "point-30", "to": "point-33", "connection_type": "crosswalk" },
-      { "from": "point-29", "to": "point-34", "connection_type": "crosswalk" },
+      { "from": "point-30", "to": "point-41", "connection_type": "crosswalk" },
+      { "from": "point-29", "to": "point-42", "connection_type": "crosswalk" },
 
       { "from": "point-13", "to": "point-14", "connection_type": "bus" },
       { "from": "point-14", "to": "point-15", "connection_type": "bus" },
@@ -112,9 +112,9 @@
 
       { "from": "point-18", "to": "point-20", "connection_type": "bus" },
       { "from": "point-20", "to": "point-19", "connection_type": "bus" },
-      { "from": "point-19", "to": "point-34", "connection_type": "bus" },
-      { "from": "point-34", "to": "point-33", "connection_type": "bus" },
-      { "from": "point-33", "to": "point-18", "connection_type": "bus" }
+      { "from": "point-19", "to": "point-42", "connection_type": "bus" },
+      { "from": "point-42", "to": "point-41", "connection_type": "bus" },
+      { "from": "point-41", "to": "point-18", "connection_type": "bus" }
     ]
   },
   "notes": [

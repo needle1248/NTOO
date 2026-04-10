@@ -1,0 +1,61 @@
+{
+  "route_id": "route-face-sequence-1-2-3-4",
+  "user_id": "blind_user_01",
+  "start_node": 101,
+  "goal_node": 104,
+  "via_nodes": [102, 103],
+  "require_face_verification": true,
+  "auto_advance": false,
+  "nodes": [
+    {
+      "node_id": 101,
+      "label": "Point 1",
+      "node_type": "nav_point",
+      "device_id": "np1-101",
+      "camera_device_id": 1
+    },
+    {
+      "node_id": 102,
+      "label": "Point 2",
+      "node_type": "nav_point",
+      "device_id": "np1-102",
+      "camera_device_id": 2
+    },
+    {
+      "node_id": 103,
+      "label": "Point 3",
+      "node_type": "nav_point",
+      "device_id": "np1-103",
+      "camera_device_id": 3
+    },
+    {
+      "node_id": 104,
+      "label": "Point 4",
+      "node_type": "nav_point",
+      "device_id": "np1-104",
+      "camera_device_id": 4
+    }
+  ],
+  "actions": [
+    {
+      "action": "go_to_point",
+      "node_id": 101,
+      "text": "Идите к точке 1"
+    },
+    {
+      "action": "go_to_point",
+      "node_id": 102,
+      "text": "Идите к точке 2"
+    },
+    {
+      "action": "go_to_point",
+      "node_id": 103,
+      "text": "Идите к точке 3"
+    },
+    {
+      "action": "go_to_point",
+      "node_id": 104,
+      "text": "Идите к точке 4"
+    }
+  ]
+}

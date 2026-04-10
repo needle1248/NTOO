@@ -11,8 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings, load_reference_data, load_team_profile
-from app.routers.api import router as api_router
+from app.routers.api import compat_router, router as api_router
 from app.services.city_client import CityClient
+from app.services.face_runtime import FaceRuntimeService
 from app.services.local_state import LocalState
 from app.services.text_generation_service import TextGenerationService
 from app.services.tts_service import NeuralTtsService
@@ -44,12 +45,15 @@ def create_app() -> FastAPI:
         app.state.team_profile = team_profile
         app.state.city_client = CityClient(settings)
         app.state.text_generation_service = TextGenerationService(settings)
+        app.state.face_runtime = FaceRuntimeService(settings)
+        app.state.face_runtime.startup()
         app.state.local_state = LocalState(
             team_profile,
             signal_catalog=reference_data.get("signal_presets", {}),
             city_receive_log_path=settings.city_receive_log_path,
             city_receive_log_entries_limit=settings.city_receive_log_entries_limit,
             city_receive_log_updates_preview_limit=settings.city_receive_log_updates_preview_limit,
+            board_offline_after_seconds=settings.board_offline_after_seconds,
             text_generation_service=app.state.text_generation_service,
         )
         app.state.tts_service = NeuralTtsService(settings)
@@ -69,7 +73,14 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+    settings.snapshot_dir.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/camera-log/files",
+        StaticFiles(directory=str(settings.snapshot_dir)),
+        name="camera-log-files",
+    )
     app.include_router(api_router)
+    app.include_router(compat_router)
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:

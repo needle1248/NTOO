@@ -14,9 +14,14 @@ def build_client():
     os.environ["ENABLE_CITY_POLLING"] = "false"
     os.environ["TTS_ENABLED"] = "false"
     os.environ["TEXT_GENERATION_ENABLED"] = "false"
+    runtime_dir = Path(tempfile.mkdtemp(prefix="ntoo-runtime-"))
     os.environ["CITY_RECEIVE_LOG_PATH"] = str(
         Path(tempfile.mkdtemp(prefix="ntoo-city-log-")) / "city-receive-log.txt"
     )
+    os.environ["DATA_DIR"] = str(runtime_dir)
+    os.environ["FACES_DIR"] = str(runtime_dir / "faces")
+    os.environ["MODELS_DIR"] = str(runtime_dir / "models")
+    os.environ["SNAPSHOT_DIR"] = str(runtime_dir / "snapshots")
     get_settings.cache_clear()
     app = create_app()
     sent_events = []
@@ -45,6 +50,83 @@ def test_type1_event_is_accepted_and_logged():
         state = client.get("/api/state").json()
         assert state["metrics"]["forwarded_ok"] == 1
         assert state["voice_queue"][0]["text"] == "Тест озвучки"
+
+
+def test_compat_event_endpoint_uses_existing_event_chain():
+    app, fake_send_event, sent_events = build_client()
+    with TestClient(app) as client:
+        client.app.state.city_client.send_event = fake_send_event
+        response = client.post("/event", json={"type": 4, "device_id": 10, "rfid_code": "legacy-card"})
+
+        assert response.status_code == 200
+        assert response.json()["accepted"] is True
+        assert sent_events == [{"type": 4, "device_id": 10, "rfid_code": "legacy-card"}]
+
+
+def test_compat_device_command_endpoint_keeps_legacy_shape():
+    app, fake_send_event, _ = build_client()
+    with TestClient(app) as client:
+        client.app.state.city_client.send_event = fake_send_event
+        start_response = client.post(
+            "/api/navigation/start",
+            json={"start_point_id": "point-1", "destination_point_id": "point-7"},
+        )
+        assert start_response.status_code == 200
+
+        legacy_response = client.get("/devices/type1/10/command")
+        assert legacy_response.status_code == 200
+        legacy_command = legacy_response.json()
+        assert legacy_command["active"] is True
+        assert legacy_command["command_type"] == "type1_sound"
+        assert legacy_command["payload"]["frequency_hz"] > 0
+        assert legacy_command["payload"]["duration_ms"] > 0
+        assert legacy_command["updated_at"] is not None
+
+        current_response = client.get("/api/devices/10/command?device_type=type1")
+        assert current_response.status_code == 200
+        assert current_response.json()["active"] is True
+
+
+def test_compat_heartbeat_updates_board_status():
+    app, _, _ = build_client()
+    with TestClient(app) as client:
+        response = client.post(
+            "/devices/heartbeat",
+            json={
+                "board_type": "type1_sound",
+                "device_id": 10,
+                "firmware": "device_node_mcp4725",
+                "ip_address": "10.0.0.15",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["board_key"] == "type1_sound:10"
+        assert response.json()["online"] is True
+
+        status = client.get("/api/device-status").json()
+        assert status[0]["board_key"] == "type1_sound:10"
+        assert status[0]["firmware"] == "device_node_mcp4725"
+
+
+def test_esp32_cam_frame_endpoint_does_not_bypass_event_chain():
+    app, fake_send_event, sent_events = build_client()
+    with TestClient(app) as client:
+        client.app.state.city_client.send_event = fake_send_event
+        response = client.post(
+            "/devices/esp32-cam/4/frame",
+            content=b"not-a-real-jpeg",
+            headers={"Content-Type": "image/jpeg"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["prediction"]["matched"] is False
+        assert payload["dispatched"] == []
+        assert sent_events == []
+
+        status = client.get("/api/faces/status").json()
+        assert len(status["snapshots"]) == 1
 
 
 def test_environment_creates_clothing_recommendation():
@@ -219,11 +301,11 @@ def test_navigation_advances_on_rfid_and_face_confirmation():
         assert rfid_response.status_code == 200
         rfid_data = rfid_response.json()
         assert len(rfid_data["followups"]) == 2
-        assert rfid_data["followups"][1]["event"]["device_id"] == 9
+        assert rfid_data["followups"][1]["event"]["device_id"] == 102
 
         face_response = client.post(
             "/api/events",
-            json={"type": 6, "device_id": 888, "user_id": "SpiderMan", "confidence": 0.98},
+            json={"type": 6, "device_id": 2, "user_id": "SpiderMan", "confidence": 0.98},
         )
         assert face_response.status_code == 200
         face_data = face_response.json()
@@ -241,7 +323,7 @@ def test_navigation_advances_on_rfid_and_face_confirmation():
         assert sent_events[3]["type"] == 1
         assert "Дальше двигайтесь пешком до точки 9." in sent_events[3]["text"]
         assert sent_events[4]["type"] == 2
-        assert sent_events[4]["device_id"] == 9
+        assert sent_events[4]["device_id"] == 102
         assert sent_events[6]["type"] == 1
 
 
@@ -256,8 +338,8 @@ def test_navigation_crosswalks_only_use_local_team_stops():
         assert {"to_point_id": "point-15", "connection_type": "crosswalk"} in graph["point-11"]
         assert {"to_point_id": "point-20", "connection_type": "crosswalk"} in graph["point-31"]
         assert {"to_point_id": "point-19", "connection_type": "crosswalk"} in graph["point-32"]
-        assert {"to_point_id": "point-33", "connection_type": "crosswalk"} in graph["point-30"]
-        assert {"to_point_id": "point-34", "connection_type": "crosswalk"} in graph["point-29"]
+        assert {"to_point_id": "point-41", "connection_type": "crosswalk"} in graph["point-30"]
+        assert {"to_point_id": "point-42", "connection_type": "crosswalk"} in graph["point-29"]
 
         assert {"to_point_id": "point-13", "connection_type": "crosswalk"} not in graph["point-9"]
         assert {"to_point_id": "point-14", "connection_type": "crosswalk"} not in graph["point-10"]
@@ -265,8 +347,142 @@ def test_navigation_crosswalks_only_use_local_team_stops():
         assert {"to_point_id": "point-16", "connection_type": "crosswalk"} not in graph["point-11"]
         assert {"to_point_id": "point-19", "connection_type": "crosswalk"} not in graph["point-31"]
         assert {"to_point_id": "point-20", "connection_type": "crosswalk"} not in graph["point-32"]
-        assert {"to_point_id": "point-33", "connection_type": "crosswalk"} not in graph["point-29"]
-        assert {"to_point_id": "point-34", "connection_type": "crosswalk"} not in graph["point-30"]
+        assert {"to_point_id": "point-41", "connection_type": "crosswalk"} not in graph["point-29"]
+        assert {"to_point_id": "point-42", "connection_type": "crosswalk"} not in graph["point-30"]
+
+
+def test_navigation_accepts_camera_ids_for_mapped_points():
+    app, fake_send_event, sent_events = build_client()
+    with TestClient(app) as client:
+        client.app.state.city_client.send_event = fake_send_event
+
+        state = client.get("/api/state").json()
+        points = {point["point_id"]: point for point in state["navigation"]["points"]}
+        assert points["point-14"]["device_id"] == 101
+        assert points["point-14"]["confirmation"]["rfid_device_id"] == 101
+        assert points["point-14"]["confirmation"]["face_device_id"] == 1
+        assert points["point-9"]["device_id"] == 102
+        assert points["point-6"]["device_id"] == 103
+        assert points["point-8"]["device_id"] == 104
+
+        start_response = client.post(
+            "/api/navigation/start",
+            json={"start_point_id": "point-9", "destination_point_id": "point-16"},
+        )
+        assert start_response.status_code == 200
+        start_data = start_response.json()
+        assert start_data["navigation"]["current_point"]["point_id"] == "point-9"
+        assert start_data["navigation"]["current_point"]["device_id"] == 102
+        assert [event["type"] for event in sent_events] == [1, 2]
+        assert sent_events[1]["device_id"] == 102
+
+        rfid_with_camera_id_response = client.post(
+            "/api/events",
+            json={"type": 4, "device_id": 1, "rfid_code": "camera-id-is-not-rfid"},
+        )
+        assert rfid_with_camera_id_response.status_code == 200
+        assert rfid_with_camera_id_response.json()["followups"] == []
+        state = client.get("/api/state").json()
+        assert state["navigation"]["current_point"]["point_id"] == "point-9"
+
+        start_confirm_response = client.post(
+            "/api/events",
+            json={"type": 6, "device_id": 2, "user_id": "SpiderMan", "confidence": 0.98},
+        )
+        assert start_confirm_response.status_code == 200
+        start_confirm_data = start_confirm_response.json()
+        assert len(start_confirm_data["followups"]) == 2
+        assert start_confirm_data["followups"][1]["event"]["device_id"] == 101
+        state = client.get("/api/state").json()
+        assert state["navigation"]["current_point"]["point_id"] == "point-14"
+
+        confirm_response = client.post(
+            "/api/events",
+            json={"type": 6, "device_id": 1, "user_id": "SpiderMan", "confidence": 0.98},
+        )
+        assert confirm_response.status_code == 200
+        confirm_data = confirm_response.json()
+        assert len(confirm_data["followups"]) == 2
+
+        state = client.get("/api/state").json()
+        assert state["navigation"]["last_confirmation"]["point_id"] == "point-14"
+        assert state["navigation"]["last_confirmation"]["device_id"] == 1
+        assert state["navigation"]["last_confirmation"]["type"] == "face"
+        assert state["navigation"]["current_point"]["point_id"] == "point-15"
+
+
+def test_navigation_verifies_start_before_next_point_signal():
+    app, _, sent_events = build_client()
+    with TestClient(app) as client:
+        observed_city_send_points = []
+
+        async def observing_send_event(payload):
+            if payload.get("type") == 6:
+                snapshot = await client.app.state.local_state.snapshot()
+                current_point = snapshot["navigation"]["current_point"]
+                observed_city_send_points.append(
+                    current_point["point_id"] if current_point else None
+                )
+            sent_events.append(payload)
+            return {
+                "ok": True,
+                "status_code": 200,
+                "response_text": "ok",
+                "latency_ms": 1.0,
+            }
+
+        client.app.state.city_client.send_event = observing_send_event
+
+        start_response = client.post(
+            "/api/navigation/start",
+            json={"start_point_id": "point-9", "destination_point_id": "point-8"},
+        )
+        assert start_response.status_code == 200
+        start_data = start_response.json()
+        assert start_data["navigation"]["current_point"]["point_id"] == "point-9"
+        assert start_data["navigation"]["current_point"]["confirmation"]["face_device_id"] == 2
+        assert [event["type"] for event in sent_events] == [1, 2]
+        assert sent_events[1] == {
+            "type": 2,
+            "device_id": 102,
+            "frequency_hz": 1100,
+            "duration_ms": 1000,
+        }
+
+        start_confirm_response = client.post(
+            "/api/events",
+            json={"type": 6, "device_id": 2, "user_id": "SpiderMan", "confidence": 0.98},
+        )
+        assert start_confirm_response.status_code == 200
+        start_confirm_data = start_confirm_response.json()
+        assert len(start_confirm_data["followups"]) == 2
+        assert start_confirm_data["followups"][1]["event"] == {
+            "type": 2,
+            "device_id": 104,
+            "frequency_hz": 1900,
+            "duration_ms": 1000,
+        }
+        assert observed_city_send_points == ["point-8"]
+
+        state = client.get("/api/state").json()
+        assert state["navigation"]["current_point"]["point_id"] == "point-8"
+        assert [point["point_id"] for point in state["navigation"]["confirmed_points"]] == ["point-9"]
+
+        finish_response = client.post(
+            "/api/events",
+            json={"type": 6, "device_id": 4, "user_id": "SpiderMan", "confidence": 0.98},
+        )
+        assert finish_response.status_code == 200
+        finish_data = finish_response.json()
+        assert len(finish_data["followups"]) == 1
+        assert "Маршрут завершён" in finish_data["followups"][0]["event"]["text"]
+
+        state = client.get("/api/state").json()
+        assert state["navigation"]["status"] == "completed"
+        assert [point["point_id"] for point in state["navigation"]["confirmed_points"]] == [
+            "point-9",
+            "point-8",
+        ]
 
 
 def test_navigation_collapses_bus_ring_into_single_route_step():
@@ -299,9 +515,18 @@ def test_navigation_keeps_bus_ring_progression_between_hidden_stops():
         )
         assert start_response.status_code == 200
 
+        start_confirm_response = client.post(
+            "/api/events",
+            json={"type": 6, "device_id": 2, "user_id": "SpiderMan", "confidence": 0.98},
+        )
+        assert start_confirm_response.status_code == 200
+        start_confirm_data = start_confirm_response.json()
+        assert len(start_confirm_data["followups"]) == 2
+        assert start_confirm_data["followups"][1]["event"]["device_id"] == 101
+
         confirm_response = client.post(
             "/api/events",
-            json={"type": 4, "device_id": 14, "rfid_code": "ring-card"},
+            json={"type": 4, "device_id": 101, "rfid_code": "ring-card"},
         )
         assert confirm_response.status_code == 200
         data = confirm_response.json()

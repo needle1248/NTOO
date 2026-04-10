@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
+    BoardHeartbeat,
     DistanceReading,
     EnvironmentReading,
     FaceEvent,
@@ -52,12 +53,14 @@ ForwardedEvent = VoiceEvent | SoundEvent | LightEvent | RfidEvent | ObstacleEven
 NavigationFollowUpEvent = VoiceEvent | SoundEvent | LightEvent
 
 CONNECTION_TYPE_LABELS = {
+    "start": "Проверка старта",
     "walk": "Пешая связь",
     "bus": "Автобусная связь",
     "crosswalk": "Пешеходный переход",
 }
 
 CONNECTION_TYPE_SPOKEN = {
+    "start": "на старте",
     "walk": "пешком",
     "bus": "автобусом",
     "crosswalk": "через пешеходный переход",
@@ -72,6 +75,7 @@ class LocalState:
         city_receive_log_path: str | None = None,
         city_receive_log_entries_limit: int = 20,
         city_receive_log_updates_preview_limit: int = 8,
+        board_offline_after_seconds: float = 15.0,
         text_generation_service: Any | None = None,
     ) -> None:
         self.team_profile = team_profile
@@ -84,6 +88,7 @@ class LocalState:
             maxlen=max(city_receive_log_entries_limit, 1)
         )
         self.city_receive_log_updates_preview_limit = max(city_receive_log_updates_preview_limit, 1)
+        self.board_offline_after_seconds = max(board_offline_after_seconds, 1.0)
 
         self.events_log: deque[dict[str, Any]] = deque(maxlen=200)
         self.environment: dict[str, Any] | None = None
@@ -126,6 +131,7 @@ class LocalState:
         self.obstacles: list[dict[str, Any]] = []
         self.events_rfid: list[dict[str, Any]] = []
         self.events_face: list[dict[str, Any]] = []
+        self.board_registry: dict[str, dict[str, Any]] = {}
 
         route_by_bus = team_profile.get("bus", {}).get("route_by_bus", {})
         self.target_stop_id = team_profile.get("bus", {}).get("target_stop_id")
@@ -250,6 +256,10 @@ class LocalState:
                 waypoint_point_ids=resolved_waypoint_ids,
                 blocked_point_ids=self._blocked_point_ids(),
             )
+            wait_for_start_confirmation = self._requires_start_confirmation(
+                start_point,
+                route_segments,
+            )
 
             self.navigation_state.update(
                 {
@@ -260,7 +270,11 @@ class LocalState:
                     "destination_point_id": resolved_destination_id,
                     "route_segments": route_segments,
                     "route_point_ids": [segment["to_point_id"] for segment in route_segments],
-                    "current_route_index": 0 if route_segments else None,
+                    "current_route_index": (
+                        -1
+                        if wait_for_start_confirmation
+                        else 0 if route_segments else None
+                    ),
                     "confirmed_point_ids": [],
                     "waypoint_point_ids": resolved_waypoint_ids,
                     "service_id": service_id,
@@ -271,6 +285,7 @@ class LocalState:
                     "last_confirmation": None,
                 }
             )
+            self._clear_navigation_device_commands_locked()
 
             if not route_segments:
                 base_message = self._compose_voice_message(
@@ -306,13 +321,21 @@ class LocalState:
             first_segment = route_segments[0]
             first_point = self.navigation_points_by_id[first_segment["to_point_id"]]
             route_text = self._format_route_sequence(route_segments)
-            base_message = self._compose_voice_message(
-                self._service_intro(service, ticket_number),
-                f"Маршрут до {self._spoken_point_name(destination_point)} готов.",
-                f"Стартуем от {start_point['name']}.",
-                self._build_waypoint_notice(resolved_waypoint_ids),
-                self._build_step_prompt(first_segment, lead="Сначала"),
-            )
+            if wait_for_start_confirmation:
+                base_message = self._compose_voice_message(
+                    self._service_intro(service, ticket_number),
+                    "Маршрут построен.",
+                    f"Сначала подтвердите стартовую точку: {start_point['name']}.",
+                    "После подтверждения включу ориентир следующей точки.",
+                )
+            else:
+                base_message = self._compose_voice_message(
+                    self._service_intro(service, ticket_number),
+                    f"Маршрут до {self._spoken_point_name(destination_point)} готов.",
+                    f"Стартуем от {start_point['name']}.",
+                    self._build_waypoint_notice(resolved_waypoint_ids),
+                    self._build_step_prompt(first_segment, lead="Сначала"),
+                )
             message = self._refine_voice_text(
                 base_message,
                 intent="navigation_start",
@@ -336,21 +359,24 @@ class LocalState:
                     "ticket_number": ticket_number,
                     "route": [segment["to_point_id"] for segment in route_segments],
                     "first_point_id": first_point["point_id"],
+                    "wait_for_start_confirmation": wait_for_start_confirmation,
                 },
             )
+            if wait_for_start_confirmation:
+                return self._build_navigation_events(message, start_point)
             return self._build_navigation_events(message, first_point)
 
     async def register_forwarded_event(
         self,
         event: ForwardedEvent,
         city_result: dict[str, Any],
+        *,
+        count_metrics: bool = True,
     ) -> list[NavigationFollowUpEvent]:
         async with self._lock:
             self.city["last_forward_result"] = city_result
-            if city_result["ok"]:
-                self.metrics["forwarded_ok"] += 1
-            else:
-                self.metrics["forwarded_failed"] += 1
+            if count_metrics:
+                self._record_forward_metrics_locked(city_result)
 
             self._append_log(
                 {
@@ -366,6 +392,17 @@ class LocalState:
                 follow_ups.extend(self._reroute_navigation_for_obstacle(event))
             self._rebuild_recommendations()
             return follow_ups
+
+    async def record_forward_result(self, city_result: dict[str, Any]) -> None:
+        async with self._lock:
+            self.city["last_forward_result"] = city_result
+            self._record_forward_metrics_locked(city_result)
+
+    def _record_forward_metrics_locked(self, city_result: dict[str, Any]) -> None:
+        if city_result["ok"]:
+            self.metrics["forwarded_ok"] += 1
+        else:
+            self.metrics["forwarded_failed"] += 1
 
     async def update_environment(self, reading: EnvironmentReading) -> None:
         async with self._lock:
@@ -409,18 +446,20 @@ class LocalState:
         async with self._lock:
             if device_type == "type1":
                 command = self.devices_type1.get(str(device_id), {})
+                active = bool(command) and command.get("active") is not False
                 return {
                     "device_id": device_id,
                     "device_type": device_type,
-                    "active": bool(command),
+                    "active": active,
                     "command": command,
                 }
             if device_type == "type2":
                 command = self.devices_type2.get(str(device_id), {})
+                active = bool(command) and command.get("active") is not False
                 return {
                     "device_id": device_id,
                     "device_type": device_type,
-                    "active": bool(command),
+                    "active": active,
                     "command": command,
                 }
             return {
@@ -429,6 +468,30 @@ class LocalState:
                 "active": self.vibration_state["active"],
                 "command": self.vibration_state,
             }
+
+    async def register_board_heartbeat(self, heartbeat: BoardHeartbeat) -> dict[str, Any]:
+        async with self._lock:
+            board_key = self._board_key(heartbeat.board_type, heartbeat.device_id)
+            payload = heartbeat.model_dump()
+            payload.update(
+                {
+                    "board_key": board_key,
+                    "last_seen_at": time.time(),
+                }
+            )
+            self.board_registry[board_key] = payload
+            self._append_log(
+                {
+                    "category": "board_heartbeat",
+                    "timestamp": _now_iso(),
+                    "payload": payload,
+                }
+            )
+            return self._board_status_item_locked(payload)
+
+    async def board_status(self) -> list[dict[str, Any]]:
+        async with self._lock:
+            return self._board_status_locked()
 
     async def snapshot(self) -> dict[str, Any]:
         async with self._lock:
@@ -452,6 +515,7 @@ class LocalState:
                     "rfid": self.events_rfid,
                     "face": self.events_face,
                 },
+                "board_status": self._board_status_locked(),
                 "environment": self.environment,
                 "distance": self.distance_state,
                 "vibration": self.vibration_state,
@@ -721,8 +785,12 @@ class LocalState:
 
         if point_config.get("rfid_device_id") is not None:
             confirmation["rfid_device_id"] = point_config["rfid_device_id"]
+        if point_config.get("rfid_device_ids") is not None:
+            confirmation["rfid_device_ids"] = point_config["rfid_device_ids"]
         if point_config.get("face_device_id") is not None:
             confirmation["face_device_id"] = point_config["face_device_id"]
+        if point_config.get("face_device_ids") is not None:
+            confirmation["face_device_ids"] = point_config["face_device_ids"]
 
         frequency_hz = int(
             point_config.get("frequency_hz")
@@ -1029,6 +1097,33 @@ class LocalState:
 
         current_index = self.navigation_state["current_route_index"]
         route_segments = self.navigation_state["route_segments"]
+        if current_index == -1:
+            next_segment = route_segments[0]
+            next_point = self.navigation_points_by_id[next_segment["to_point_id"]]
+            self.navigation_state["current_route_index"] = 0
+            self.navigation_state["status"] = "awaiting_confirmation"
+            self.navigation_state["message"] = self._refine_voice_text(
+                self._compose_voice_message(
+                    f"{current_point['name']} подтверждена через {source}.",
+                    self._build_step_prompt(next_segment, lead="Теперь"),
+                ),
+                intent="navigation_start_confirmed",
+                context={
+                    "confirmed_point_id": current_point["point_id"],
+                    "next_point_id": next_point["point_id"],
+                    "source": source,
+                },
+            )
+            self._append_navigation_log(
+                "start_confirmed",
+                {
+                    "confirmed_point_id": current_point["point_id"],
+                    "next_point_id": next_point["point_id"],
+                    "source": source,
+                },
+            )
+            return self._build_navigation_events(self.navigation_state["message"], next_point)
+
         if current_index is None or current_index >= len(route_segments) - 1:
             self.navigation_state["active"] = False
             self.navigation_state["status"] = "completed"
@@ -1093,7 +1188,11 @@ class LocalState:
 
         current_index = self.navigation_state["current_route_index"]
         route_segments = self.navigation_state["route_segments"]
-        remaining_segments = route_segments[current_index:] if current_index is not None else route_segments
+        remaining_segments = (
+            route_segments[current_index:]
+            if current_index is not None and current_index >= 0
+            else route_segments
+        )
         remaining_point_ids = {
             point_id
             for segment in remaining_segments
@@ -1209,11 +1308,20 @@ class LocalState:
         route_segments = self.navigation_state["route_segments"]
         if current_index is None:
             return None
+        if current_index == -1:
+            start_point_id = self.navigation_state["start_point_id"]
+            return {
+                "from_point_id": start_point_id,
+                "to_point_id": start_point_id,
+                "connection_type": "start",
+            }
         if current_index < 0 or current_index >= len(route_segments):
             return None
         return route_segments[current_index]
 
     def _current_navigation_point(self) -> dict[str, Any] | None:
+        if self.navigation_state["current_route_index"] == -1:
+            return self.navigation_points_by_id.get(self.navigation_state["start_point_id"])
         current_segment = self._current_navigation_segment()
         if current_segment is None:
             return None
@@ -1229,9 +1337,9 @@ class LocalState:
     ) -> bool:
         confirmation = point.get("confirmation", {})
         allowed_methods = []
-        if confirmation.get("rfid_device_id") is not None:
+        if self._confirmation_device_ids(confirmation, "rfid"):
             allowed_methods.append("rfid")
-        if confirmation.get("face_device_id") is not None:
+        if self._confirmation_device_ids(confirmation, "face"):
             allowed_methods.append("face")
 
         if isinstance(event, RfidEvent):
@@ -1239,15 +1347,31 @@ class LocalState:
                 return True
             if "rfid" not in allowed_methods:
                 return False
-            expected = confirmation.get("rfid_device_id")
-            return expected is None or int(expected) == event.device_id
+            expected_ids = self._confirmation_device_ids(confirmation, "rfid")
+            return not expected_ids or event.device_id in expected_ids
 
         if not allowed_methods:
             return True
         if "face" not in allowed_methods:
             return False
-        expected = confirmation.get("face_device_id")
-        return expected is None or int(expected) == event.device_id
+        expected_ids = self._confirmation_device_ids(confirmation, "face")
+        return not expected_ids or event.device_id in expected_ids
+
+    def _confirmation_device_ids(self, confirmation: dict[str, Any], method: str) -> list[int]:
+        ids: list[int] = []
+        for key in (f"{method}_device_id", f"{method}_device_ids"):
+            value = confirmation.get(key)
+            values = value if isinstance(value, list) else [value]
+            for item in values:
+                if item is None:
+                    continue
+                try:
+                    device_id = int(item)
+                except (TypeError, ValueError):
+                    continue
+                if device_id not in ids:
+                    ids.append(device_id)
+        return ids
 
     def _build_navigation_events(
         self,
@@ -1335,15 +1459,18 @@ class LocalState:
         confirmed_point_ids = set(self.navigation_state["confirmed_point_ids"])
         route_segments = self.navigation_state["route_segments"]
         display_route_segments = self._collapse_route_segments(route_segments)
+        current_route_index = self.navigation_state["current_route_index"]
 
         route: list[dict[str, Any]] = []
-        for segment in display_route_segments:
+        for index, segment in enumerate(display_route_segments):
             segment_point_ids = self._segment_point_ids(segment)
             status = "pending"
             if segment_point_ids and all(
                 point_id in confirmed_point_ids for point_id in segment_point_ids
             ):
                 status = "confirmed"
+            elif current_route_index == -1 and index == 0:
+                status = "active"
             elif current_segment and current_segment["to_point_id"] in segment_point_ids:
                 status = "active"
 
@@ -1439,9 +1566,9 @@ class LocalState:
 
         confirmation = point.get("confirmation", {})
         methods = []
-        if confirmation.get("rfid_device_id") is not None:
+        if self._confirmation_device_ids(confirmation, "rfid"):
             methods.append("rfid")
-        if confirmation.get("face_device_id") is not None:
+        if self._confirmation_device_ids(confirmation, "face"):
             methods.append("face")
         if not methods:
             methods = ["rfid", "face"]
@@ -1455,6 +1582,7 @@ class LocalState:
             "duration_ms": point["duration_ms"],
             "color": point.get("color"),
             "ring_index": point["ring_index"],
+            "confirmation": deepcopy(confirmation),
             "confirmation_methods": methods,
         }
 
@@ -1463,9 +1591,9 @@ class LocalState:
         prompt = f"{lead} двигайтесь {self._format_route_segment(segment, short=True)}."
         if to_point.get("device_id") is not None:
             if to_point.get("device_type") == "type2" and to_point.get("color"):
-                prompt += f" Ориентир: подсветка точки {to_point['name']}."
+                prompt += f" Ориентир: подсветка {self._spoken_point_name(to_point)}."
             else:
-                prompt += f" Ориентир: звуковой сигнал точки {to_point['name']}."
+                prompt += f" Ориентир: звуковой сигнал {self._spoken_point_name(to_point)}."
         return prompt
 
     def _format_route_sequence(self, route_segments: list[dict[str, str]]) -> str:
@@ -1478,6 +1606,10 @@ class LocalState:
     def _format_route_segment(self, segment: dict[str, str], short: bool = False) -> str:
         from_point = self.navigation_points_by_id[segment["from_point_id"]]
         to_point = self.navigation_points_by_id[segment["to_point_id"]]
+        if segment["connection_type"] == "start":
+            if short:
+                return f"подтвердить {self._spoken_point_name(to_point)}"
+            return f"Проверка старта: {to_point['name']}"
         spoken = self._connection_type_spoken(segment["connection_type"])
         if short:
             if segment["connection_type"] == "bus" and segment.get("via_point_ids"):
@@ -1505,6 +1637,35 @@ class LocalState:
     def _connection_type_spoken(self, connection_type: str) -> str:
         return CONNECTION_TYPE_SPOKEN.get(connection_type, "по маршруту")
 
+    def _requires_start_confirmation(
+        self,
+        start_point: dict[str, Any],
+        route_segments: list[dict[str, Any]],
+    ) -> bool:
+        if not route_segments:
+            return False
+        confirmation = start_point.get("confirmation", {})
+        return bool(
+            self._confirmation_device_ids(confirmation, "rfid")
+            or self._confirmation_device_ids(confirmation, "face")
+        )
+
+    def _clear_navigation_device_commands_locked(self) -> None:
+        cleared_at = time.time()
+        for point in self.navigation_points:
+            device_id = point.get("device_id")
+            if device_id is None:
+                continue
+            bucket = self.devices_type2 if point.get("device_type") == "type2" else self.devices_type1
+            removed_command = bucket.pop(str(device_id), None)
+            if removed_command:
+                bucket[str(device_id)] = {
+                    "active": False,
+                    "device_id": int(device_id),
+                    "reason": "route_reset",
+                    "updated_at": cleared_at,
+                }
+
     def _append_navigation_log(self, action: str, payload: dict[str, Any]) -> None:
         self._append_log(
             {
@@ -1516,6 +1677,27 @@ class LocalState:
                 },
             }
         )
+
+    def _board_key(self, board_type: str, device_id: int) -> str:
+        return f"{board_type}:{device_id}"
+
+    def _board_status_locked(self) -> list[dict[str, Any]]:
+        return [
+            self._board_status_item_locked(payload)
+            for payload in sorted(
+                self.board_registry.values(),
+                key=lambda item: str(item.get("board_key", "")),
+            )
+        ]
+
+    def _board_status_item_locked(self, payload: dict[str, Any]) -> dict[str, Any]:
+        last_seen_at = float(payload.get("last_seen_at") or 0.0)
+        seconds_since_seen = max(time.time() - last_seen_at, 0.0)
+        return {
+            **payload,
+            "online": seconds_since_seen <= self.board_offline_after_seconds,
+            "seconds_since_seen": round(seconds_since_seen, 2),
+        }
 
     def _normalize_device_bucket(self, payload: Any) -> dict[str, dict[str, Any]]:
         if isinstance(payload, dict):
@@ -1558,9 +1740,11 @@ class LocalState:
             self.voice_queue = self.voice_queue[:20]
             return
         if isinstance(event, SoundEvent):
+            dumped["updated_at"] = time.time()
             self.devices_type1[str(event.device_id)] = dumped
             return
         if isinstance(event, LightEvent):
+            dumped["updated_at"] = time.time()
             self.devices_type2[str(event.device_id)] = dumped
             return
         if isinstance(event, RfidEvent):
@@ -1577,12 +1761,74 @@ class LocalState:
 
     def _rebuild_recommendations(self) -> None:
         buses = self.bus_tracker.snapshot(self.target_stop_id)
-        self.recommendations["clothing"] = build_clothing_recommendation(self.environment)
+        clothing = build_clothing_recommendation(self.environment)
+        self.recommendations["clothing"] = self._refine_recommendation_text(
+            clothing,
+            kind="clothing",
+            intent="clothing_recommendation",
+        )
         self.recommendations["traffic"] = build_traffic_recommendation(
             buses.get("best_eta_seconds"),
             buses.get("baseline_eta_seconds"),
         )
         self.recommendations["obstacle"] = build_obstacle_recommendation(self.obstacles)
+
+    def _refine_recommendation_text(
+        self,
+        recommendation: dict[str, Any] | None,
+        *,
+        kind: str,
+        intent: str,
+    ) -> dict[str, Any] | None:
+        if not recommendation:
+            return recommendation
+
+        draft_text = recommendation.get("text")
+        if not isinstance(draft_text, str) or not draft_text.strip():
+            return recommendation
+
+        service = self.text_generation_service
+        if service is None or not getattr(service, "enabled", True):
+            return recommendation
+
+        style_hints = (
+            "короткий практичный совет",
+            "спокойный заботливый совет",
+            "дружелюбный короткий совет",
+            "ясный совет в стиле чек-листа",
+        )
+        variant_seed = int(time.time() // 45)
+        variant_index = variant_seed % len(style_hints)
+        context = {
+            key: value
+            for key, value in recommendation.items()
+            if key != "text"
+        }
+        context.update(
+            {
+                "kind": kind,
+                "style_hint": style_hints[variant_index],
+                "variant_seed": variant_seed,
+            }
+        )
+
+        try:
+            refined_text = service.rewrite_text(
+                draft_text,
+                intent=intent,
+                context=context,
+            )
+        except Exception:
+            return recommendation
+
+        if not refined_text or refined_text == draft_text:
+            return recommendation
+
+        refined = dict(recommendation)
+        refined["text"] = refined_text
+        refined["draft_text"] = draft_text
+        refined["generated_by"] = "text_generation_service"
+        return refined
 
     def _append_log(self, entry: dict[str, Any]) -> None:
         self.events_log.appendleft(entry)

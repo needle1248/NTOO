@@ -324,6 +324,82 @@ textarea {
   margin-top: 18px;
 }
 
+.route-progress-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(0, 95, 115, 0.12), rgba(221, 90, 32, 0.1)),
+    rgba(255, 253, 247, 0.86);
+  border: 1px solid rgba(0, 95, 115, 0.16);
+}
+
+.route-progress-head,
+.route-progress-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.route-progress-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.route-progress-head strong {
+  display: block;
+  font-size: 1.25rem;
+}
+
+.route-progress-score {
+  min-width: 88px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  text-align: center;
+  color: white;
+  background: linear-gradient(135deg, var(--secondary), var(--primary));
+  box-shadow: 0 14px 30px rgba(0, 95, 115, 0.18);
+}
+
+.route-progress-meter {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(33, 49, 50, 0.11);
+}
+
+.route-progress-meter span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--secondary), var(--success), var(--primary));
+  transition: width 0.35s ease;
+}
+
+.route-progress-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.route-progress-grid > div {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid var(--line);
+}
+
+.route-progress-grid span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.route-progress-grid strong {
+  font-size: 1.05rem;
+}
+
 .route-steps {
   margin-top: 14px;
 }
@@ -440,6 +516,15 @@ textarea {
 
   .grid-2 {
     grid-template-columns: 1fr;
+  }
+
+  .route-progress-head,
+  .route-progress-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .route-progress-score {
+    width: fit-content;
   }
 
   .route-step {

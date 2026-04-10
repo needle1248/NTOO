@@ -1,0 +1,139 @@
+{
+  "nodes": [
+    {
+      "id": "home_a",
+      "label": "Дом пользователя",
+      "kind": "virtual",
+      "neighbors": ["street_a1"]
+    },
+    {
+      "id": "street_a1",
+      "label": "Уличная точка A1",
+      "kind": "type1",
+      "device_id": 101,
+      "neighbors": ["home_a", "stop_a"],
+      "frequency_hz": 1500,
+      "duration_ms": 1200
+    },
+    {
+      "id": "stop_a",
+      "label": "Остановка A",
+      "kind": "type1",
+      "device_id": 102,
+      "neighbors": ["street_a1", "transfer_hub"],
+      "frequency_hz": 1700,
+      "duration_ms": 1200
+    },
+    {
+      "id": "transfer_hub",
+      "label": "Пересадочный узел",
+      "kind": "type1",
+      "device_id": 103,
+      "neighbors": ["stop_a", "street_b1", "stop_c"],
+      "frequency_hz": 1900,
+      "duration_ms": 1200
+    },
+    {
+      "id": "street_b1",
+      "label": "Уличная точка B1",
+      "kind": "type1",
+      "device_id": 104,
+      "neighbors": ["transfer_hub", "office_b"],
+      "frequency_hz": 2100,
+      "duration_ms": 1200
+    },
+    {
+      "id": "office_b",
+      "label": "Конечная точка B",
+      "kind": "type1",
+      "device_id": 105,
+      "neighbors": ["street_b1"],
+      "frequency_hz": 2300,
+      "duration_ms": 1200
+    },
+    {
+      "id": "stop_c",
+      "label": "Остановка C",
+      "kind": "type1",
+      "device_id": 106,
+      "neighbors": ["transfer_hub"],
+      "frequency_hz": 2500,
+      "duration_ms": 1200
+    },
+    {
+      "id": "mfc_entry",
+      "label": "Вход в МФЦ",
+      "kind": "type2",
+      "device_id": 201,
+      "neighbors": ["mfc_hall"],
+      "color": {
+        "r": 0,
+        "g": 120,
+        "b": 255
+      }
+    },
+    {
+      "id": "mfc_hall",
+      "label": "Холл МФЦ",
+      "kind": "type2",
+      "device_id": 202,
+      "neighbors": ["mfc_entry", "mfc_window_passport", "mfc_window_benefits"],
+      "color": {
+        "r": 255,
+        "g": 140,
+        "b": 0
+      }
+    },
+    {
+      "id": "mfc_window_passport",
+      "label": "Окно паспортных услуг",
+      "kind": "type2",
+      "device_id": 203,
+      "neighbors": ["mfc_hall"],
+      "color": {
+        "r": 20,
+        "g": 200,
+        "b": 120
+      }
+    },
+    {
+      "id": "mfc_window_benefits",
+      "label": "Окно льгот",
+      "kind": "type2",
+      "device_id": 204,
+      "neighbors": ["mfc_hall"],
+      "color": {
+        "r": 180,
+        "g": 80,
+        "b": 255
+      }
+    },
+    {
+      "id": "crosswalk_vibro",
+      "label": "Виброплатформа перехода",
+      "kind": "vibro",
+      "device_id": 301,
+      "neighbors": []
+    }
+  ],
+  "bus_routes": [
+    {
+      "bus_id": 1,
+      "stops": ["stop_a", "transfer_hub", "stop_c"],
+      "average_loop_seconds": 180
+    },
+    {
+      "bus_id": 2,
+      "stops": ["transfer_hub", "stop_c", "stop_a"],
+      "average_loop_seconds": 150
+    }
+  ],
+  "services": {
+    "passport": "mfc_window_passport",
+    "benefits": "mfc_window_benefits"
+  },
+  "weather_thresholds": {
+    "cold_c": 5,
+    "hot_c": 22
+  }
+}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -111,3 +111,47 @@ class SynthesizeSpeechRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1, max_length=2000)
+
+
+class FacePrediction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    matched: bool
+    user_id: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    backend: str
+    threshold: float | None = None
+    device_id: int | None = None
+
+
+class CameraSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    device_id: int
+    filename: str
+    image_url: str
+    matched: bool = False
+    user_id: str | None = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    created_at: float
+
+
+class CameraPullRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    camera_url: str = Field(min_length=1, max_length=2000)
+
+
+class BoardHeartbeat(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    board_type: str = Field(min_length=1, max_length=64)
+    device_id: int
+    firmware: str | None = Field(default=None, max_length=120)
+    ip_address: str | None = Field(default=None, max_length=64)
+    mac_address: str | None = Field(default=None, max_length=64)
+    wifi_rssi: int | None = None
+    free_heap: int | None = None
+    free_psram: int | None = None
+    uptime_seconds: int | None = None
+    extra: dict[str, Any] = Field(default_factory=dict)

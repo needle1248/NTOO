@@ -1,0 +1,84 @@
+{
+  "devices_type1": [
+    {
+      "device_id": 101,
+      "active": false
+    },
+    {
+      "device_id": 102,
+      "active": false
+    },
+    {
+      "device_id": 103,
+      "active": false
+    },
+    {
+      "device_id": 104,
+      "active": false
+    },
+    {
+      "device_id": 105,
+      "active": false
+    },
+    {
+      "device_id": 106,
+      "active": false
+    }
+  ],
+  "devices_type2": [
+    {
+      "device_id": 201,
+      "active": false,
+      "color": {
+        "r": 0,
+        "g": 0,
+        "b": 0
+      }
+    },
+    {
+      "device_id": 202,
+      "active": false,
+      "color": {
+        "r": 0,
+        "g": 0,
+        "b": 0
+      }
+    },
+    {
+      "device_id": 203,
+      "active": false,
+      "color": {
+        "r": 0,
+        "g": 0,
+        "b": 0
+      }
+    },
+    {
+      "device_id": 204,
+      "active": false,
+      "color": {
+        "r": 0,
+        "g": 0,
+        "b": 0
+      }
+    }
+  ],
+  "buses": [
+    {
+      "bus_id": 1,
+      "current_stop": "stop_a",
+      "timestamp": 1775510400
+    },
+    {
+      "bus_id": 2,
+      "current_stop": "transfer_hub",
+      "timestamp": 1775510400
+    }
+  ],
+  "voice_queue": [],
+  "events": {
+    "rfid": [],
+    "face": []
+  },
+  "obstacles": []
+}

@@ -1,0 +1,10 @@
+{
+  "blind_user_01": {
+    "display_name": "Пользователь 1",
+    "rfid_code": "A1B4C9D2"
+  },
+  "blind_user_02": {
+    "display_name": "Пользователь 2",
+    "rfid_code": "C4D2E9A1"
+  }
+}

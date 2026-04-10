@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "NTO Smart City Local Server"
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 2162
 
     city_server_base_url: str = "http://192.168.31.63:8000"
     city_event_path: str = "/event"
@@ -23,11 +23,23 @@ class Settings(BaseSettings):
     city_receive_log_path: str = "logs/city-receive-log.txt"
     city_receive_log_entries_limit: int = 20
     city_receive_log_updates_preview_limit: int = 8
+    board_offline_after_seconds: float = 15.0
 
     team_id: int = 1
     team_name: str = "Команда 1"
     team_config_path: str = "config/team.json"
     reference_data_path: str = "config/reference-data.json"
+    data_dir: Path = Path("data")
+    faces_dir: Path = Path("data/faces")
+    models_dir: Path = Path("data/models")
+    snapshot_dir: Path = Path("data/snapshots")
+    face_backend: str = "sface"
+    face_detector_model_path: Path | None = None
+    face_embedding_model_path: Path | None = None
+    face_match_threshold: float = 0.92
+    face_image_size: int = 96
+    face_max_snapshots: int = 25
+    camera_rotate_180: bool = True
 
     tts_enabled: bool = True
     tts_model_path: str = "models/piper/ru_RU-irina-medium.onnx"

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ settings.app_name }}</title>
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260409-ui-refresh-4" />
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260410-start-signal-1" />
   </head>
   <body>
     <main class="page">
@@ -168,6 +168,31 @@
         <p id="navigationServiceInfo" class="muted">Услуга МФЦ не выбрана.</p>
         <p id="navigationBlockedPoints" class="muted">Перекрытых точек нет.</p>
         <p id="navigationRouteText" class="muted">Маршрут пока не построен.</p>
+        <div class="route-progress-panel">
+          <div class="route-progress-head">
+            <div>
+              <span class="eyebrow">Прохождение маршрута</span>
+              <strong id="navigationProgressTitle">Маршрут не запущен</strong>
+              <p id="navigationProgressDetails" class="muted">Постройте маршрут, чтобы видеть прогресс по точкам.</p>
+            </div>
+            <strong id="navigationProgressScore" class="route-progress-score">0/0</strong>
+          </div>
+          <div class="route-progress-meter" aria-label="Прогресс маршрута">
+            <span id="navigationProgressBar"></span>
+          </div>
+          <div class="route-progress-grid">
+            <div>
+              <span>Текущая цель</span>
+              <strong id="navigationProgressCurrentPoint">-</strong>
+              <p id="navigationProgressCurrentMethods" class="muted">Ожидаем построения маршрута.</p>
+            </div>
+            <div>
+              <span>Последнее подтверждение</span>
+              <strong id="navigationLastConfirmation">-</strong>
+              <p id="navigationCameraStatus" class="muted">Камера пока не подтверждала точки.</p>
+            </div>
+          </div>
+        </div>
         <div id="navigationRoute" class="route-steps"></div>
         <p class="muted">
           Для подтверждения перехода к следующей точке используйте формы TYPE 4
@@ -312,6 +337,6 @@
     <script>
       window.__TEAM_PROFILE__ = {{ team | tojson }};
     </script>
-    <script src="/static/js/app.js?v=20260409-ui-refresh-4"></script>
+    <script src="/static/js/app.js?v=20260410-start-signal-1"></script>
   </body>
 </html>

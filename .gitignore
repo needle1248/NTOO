@@ -5,4 +5,13 @@ __pycache__/
 logs/
 models/text/
 .cache/text-generation/
+data/runtime_state.json
+data/local_server.log
+data/uvicorn_*.log
+data/snapshots/
+data/faces/*
+!data/faces/README.md
+data/models/*.onnx
+data/models/*.npz
+data/models/*_meta.json
 

@@ -1,0 +1,36 @@
+{
+  "route_id": "route-face-sequence-2-3",
+  "user_id": "blind_user_01",
+  "start_node": 102,
+  "goal_node": 103,
+  "require_face_verification": true,
+  "auto_advance": false,
+  "nodes": [
+    {
+      "node_id": 102,
+      "label": "Point 2",
+      "node_type": "nav_point",
+      "device_id": "np1-102",
+      "camera_device_id": 2
+    },
+    {
+      "node_id": 103,
+      "label": "Point 3",
+      "node_type": "nav_point",
+      "device_id": "np1-103",
+      "camera_device_id": 3
+    }
+  ],
+  "actions": [
+    {
+      "action": "go_to_point",
+      "node_id": 102,
+      "text": "Идите к точке 2"
+    },
+    {
+      "action": "go_to_point",
+      "node_id": 103,
+      "text": "Идите к точке 3"
+    }
+  ]
+}

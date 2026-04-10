@@ -1,0 +1,42 @@
+{
+  "route_id": "route-face-points-demo",
+  "user_id": "blind_user_01",
+  "start_node": 100,
+  "goal_node": 102,
+  "require_face_verification": true,
+  "auto_advance": false,
+  "nodes": [
+    {
+      "node_id": 100,
+      "label": "Start",
+      "node_type": "virtual",
+      "device_id": null
+    },
+    {
+      "node_id": 101,
+      "label": "Point 101",
+      "node_type": "nav_point",
+      "device_id": "np1-101",
+      "camera_device_id": 1
+    },
+    {
+      "node_id": 102,
+      "label": "Point 102",
+      "node_type": "nav_point",
+      "device_id": "np1-102",
+      "camera_device_id": 2
+    }
+  ],
+  "actions": [
+    {
+      "action": "go_to_point",
+      "node_id": 101,
+      "text": "Идите к точке 101"
+    },
+    {
+      "action": "go_to_point",
+      "node_id": 102,
+      "text": "Идите к точке 102"
+    }
+  ]
+}
