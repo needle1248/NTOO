@@ -1,6 +1,7 @@
 import asyncio
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -127,6 +128,66 @@ def test_esp32_cam_frame_endpoint_does_not_bypass_event_chain():
 
         status = client.get("/api/faces/status").json()
         assert len(status["snapshots"]) == 1
+
+
+def test_esp32_cam_verification_returns_before_city_forward_finishes():
+    app, _, sent_events = build_client()
+    with TestClient(app) as client:
+        client.post(
+            "/api/navigation/start",
+            json={"start_point_id": "point-9", "destination_point_id": "point-8"},
+        )
+
+        def fake_recognize_face_bytes(device_id: int, image_bytes: bytes) -> dict[str, object]:
+            return {
+                "prediction": {
+                    "matched": True,
+                    "user_id": "SpiderMan",
+                    "confidence": 0.98,
+                    "backend": "stub",
+                    "threshold": 0.92,
+                    "device_id": device_id,
+                },
+                "snapshot_path": "stub.jpg",
+                "snapshot_url": "/camera-log/files/stub.jpg",
+                "orientation": "original",
+            }
+
+        async def slow_send_event(payload):
+            await asyncio.sleep(0.35)
+            sent_events.append(payload)
+            return {
+                "ok": True,
+                "status_code": 200,
+                "response_text": "ok",
+                "latency_ms": 350.0,
+            }
+
+        client.app.state.face_runtime.recognize_face_bytes = fake_recognize_face_bytes
+        client.app.state.city_client.send_event = slow_send_event
+
+        started_at = time.perf_counter()
+        response = client.post(
+            "/devices/esp32-cam/2/frame",
+            content=b"fake-jpeg",
+            headers={"Content-Type": "image/jpeg"},
+        )
+        elapsed = time.perf_counter() - started_at
+
+        assert response.status_code == 200
+        assert elapsed < 0.2
+
+        payload = response.json()
+        assert payload["prediction"]["matched"] is True
+        assert len(payload["dispatched"]) == 3
+        assert all(item["city"]["pending"] is True for item in payload["dispatched"])
+
+        state = client.get("/api/state").json()
+        assert state["navigation"]["current_point"]["point_id"] == "point-8"
+        assert state["devices_type1"]["104"]["frequency_hz"] == 1900
+
+        time.sleep(0.45)
+        assert len(sent_events) == 3
 
 
 def test_environment_creates_clothing_recommendation():
@@ -279,8 +340,19 @@ def test_navigation_start_dispatches_voice_and_first_sound():
             "type": 2,
             "device_id": 10,
             "frequency_hz": 1000,
-            "duration_ms": 1000,
+            "duration_ms": 850,
         }
+
+
+def test_navigation_auto_generated_points_use_distinct_sound_lengths():
+    app, _, _ = build_client()
+    with TestClient(app) as client:
+        points = {point["point_id"]: point for point in client.get("/api/state").json()["navigation"]["points"]}
+
+        assert points["point-10"]["frequency_hz"] == 1000
+        assert points["point-10"]["duration_ms"] == 850
+        assert points["point-11"]["duration_ms"] == 1050
+        assert points["point-12"]["duration_ms"] == 1250
 
 
 def test_navigation_advances_on_rfid_and_face_confirmation():

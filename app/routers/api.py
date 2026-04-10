@@ -36,6 +36,74 @@ def _face_runtime(request: Request):
     return runtime
 
 
+def _pending_city_result() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "status_code": None,
+        "response_text": "accepted locally; city forward pending",
+        "latency_ms": 0.0,
+        "local_first": True,
+        "pending": True,
+    }
+
+
+def _normalize_city_result(result: dict[str, Any] | BaseException) -> dict[str, Any]:
+    if isinstance(result, BaseException):
+        return {
+            "ok": False,
+            "status_code": None,
+            "response_text": str(result),
+            "latency_ms": 0.0,
+        }
+    return result
+
+
+async def _forward_events_to_city_and_record(
+    local_state: Any,
+    city_client: Any,
+    event_payloads: list[dict[str, Any]],
+) -> None:
+    city_results = await asyncio.gather(
+        *(city_client.send_event(payload) for payload in event_payloads),
+        return_exceptions=True,
+    )
+    for raw_result in city_results:
+        await local_state.record_forward_result(_normalize_city_result(raw_result))
+
+
+def _schedule_background_city_forward(
+    request: Request,
+    event_payloads: list[dict[str, Any]],
+) -> None:
+    if not event_payloads:
+        return
+
+    registry = getattr(request.app.state, "background_tasks", None)
+    if registry is None:
+        registry = set()
+        request.app.state.background_tasks = registry
+
+    task = asyncio.create_task(
+        _forward_events_to_city_and_record(
+            request.app.state.local_state,
+            request.app.state.city_client,
+            list(event_payloads),
+        )
+    )
+    registry.add(task)
+
+    def _cleanup(finished: asyncio.Task[Any]) -> None:
+        registry.discard(finished)
+        try:
+            finished.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    task.add_done_callback(_cleanup)
+
+
 async def _run_face_job(function: Any, *args: Any) -> Any:
     try:
         return await asyncio.to_thread(function, *args)
@@ -68,23 +136,21 @@ async def _dispatch_event_payload(request: Request, payload: dict[str, Any]) -> 
     }
 
 
-async def _dispatch_event_chain(request: Request, initial_events: list[Any]) -> list[dict[str, Any]]:
+async def _dispatch_event_chain(
+    request: Request,
+    initial_events: list[Any],
+    *,
+    await_city: bool = True,
+) -> list[dict[str, Any]]:
     queue = list(initial_events)
     dispatched: list[dict[str, Any]] = []
-    city_tasks: list[asyncio.Task[dict[str, Any]]] = []
     city_task_indexes: list[int] = []
+    event_payloads: list[dict[str, Any]] = []
 
     while queue:
         event = queue.pop(0)
         event_payload = event.model_dump(exclude_none=True)
-        local_result = {
-            "ok": True,
-            "status_code": None,
-            "response_text": "accepted locally; city forward pending",
-            "latency_ms": 0.0,
-            "local_first": True,
-            "pending": True,
-        }
+        local_result = _pending_city_result()
         followups = await request.app.state.local_state.register_forwarded_event(
             event,
             local_result,
@@ -97,18 +163,22 @@ async def _dispatch_event_chain(request: Request, initial_events: list[Any]) -> 
                 "city": local_result,
             }
         )
+        event_payloads.append(event_payload)
         city_task_indexes.append(len(dispatched) - 1)
-        city_tasks.append(
-            asyncio.create_task(request.app.state.city_client.send_event(event_payload))
-        )
         queue.extend(followups)
 
-    if city_tasks:
-        city_results = await asyncio.gather(*city_tasks)
-        for dispatched_index, city_result in zip(city_task_indexes, city_results, strict=True):
+    if event_payloads and await_city:
+        city_results = await asyncio.gather(
+            *(request.app.state.city_client.send_event(payload) for payload in event_payloads),
+            return_exceptions=True,
+        )
+        for dispatched_index, raw_result in zip(city_task_indexes, city_results, strict=True):
+            city_result = _normalize_city_result(raw_result)
             await request.app.state.local_state.record_forward_result(city_result)
             dispatched[dispatched_index]["accepted"] = city_result["ok"]
             dispatched[dispatched_index]["city"] = city_result
+    elif event_payloads:
+        _schedule_background_city_forward(request, event_payloads)
 
     return dispatched
 
@@ -319,7 +389,11 @@ async def _recognize_face_and_dispatch(
             user_id=prediction["user_id"],
             confidence=float(prediction.get("confidence") or 0.0),
         )
-        result["dispatched"] = await _dispatch_event_chain(request, [event])
+        result["dispatched"] = await _dispatch_event_chain(
+            request,
+            [event],
+            await_city=False,
+        )
 
     return result
 

@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.settings = settings
         app.state.team_profile = team_profile
+        app.state.background_tasks = set()
         app.state.city_client = CityClient(settings)
         app.state.text_generation_service = TextGenerationService(settings)
         app.state.face_runtime = FaceRuntimeService(settings)
@@ -69,6 +70,12 @@ def create_app() -> FastAPI:
                 poll_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await poll_task
+            background_tasks = list(getattr(app.state, "background_tasks", set()))
+            for task in background_tasks:
+                task.cancel()
+            for task in background_tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             await app.state.city_client.close()
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)

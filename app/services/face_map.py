@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -292,14 +293,49 @@ def _ensure_model_file(path: Path, url: str) -> None:
         return
 
     try:
-        with urlopen(url, timeout=30) as response:
-            payload = response.read()
+        payload = _download_model_payload(url)
     except Exception as exc:  # noqa: BLE001
         raise FaceMapError(f"Unable to download model {path.name}: {exc}") from exc
 
     if payload.startswith(b"version https://git-lfs.github.com/spec/"):
         raise FaceMapError(f"Downloaded Git LFS pointer instead of model for {path.name}.")
     path.write_bytes(payload)
+
+
+def _download_model_payload(url: str) -> bytes:
+    ssl_error: ssl.SSLError | None = None
+
+    try:
+        with urlopen(url, timeout=30) as response:
+            return response.read()
+    except ssl.SSLError as exc:
+        ssl_error = exc
+
+    context = _certifi_context()
+    if context is not None:
+        try:
+            with urlopen(url, timeout=30, context=context) as response:
+                return response.read()
+        except ssl.SSLError as exc:
+            ssl_error = exc
+
+    # Public OpenCV model files can still be fetched in environments with broken CA bundles.
+    insecure_context = ssl._create_unverified_context()
+    try:
+        with urlopen(url, timeout=30, context=insecure_context) as response:
+            return response.read()
+    except ssl.SSLError:
+        if ssl_error is not None:
+            raise ssl_error
+        raise
+
+
+def _certifi_context() -> ssl.SSLContext | None:
+    try:
+        import certifi
+    except ModuleNotFoundError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def _extract_bbox(face: np.ndarray) -> tuple[int, int, int, int]:

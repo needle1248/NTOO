@@ -800,10 +800,19 @@ class LocalState:
             or type1_signal.get("frequency_hz")
             or 1000
         )
-        duration_ms = int(
+        resolved_duration = (
             point_config.get("duration_ms")
             or signal_override.get("duration_ms")
             or preset_signal.get("duration_ms")
+        )
+        if resolved_duration is None and not (
+            point_config.get("frequency_hz")
+            or signal_override.get("frequency_hz")
+            or preset_signal.get("frequency_hz")
+        ):
+            resolved_duration = self._default_point_duration_ms(point_number)
+        duration_ms = int(
+            resolved_duration
             or type1_signal.get("duration_ms")
             or 1000
         )
@@ -820,6 +829,11 @@ class LocalState:
             "ring_index": index,
             "confirmation": confirmation,
         }
+
+    def _default_point_duration_ms(self, point_number: int) -> int:
+        # Nearby auto-generated points keep their own sound length even when frequency presets are absent.
+        duration_pattern = (650, 850, 1050, 1250)
+        return duration_pattern[(max(point_number, 1) - 1) % len(duration_pattern)]
 
     def _build_navigation_services(self, scenario: Any) -> dict[str, dict[str, Any]]:
         scenario_data = scenario if isinstance(scenario, dict) else {}

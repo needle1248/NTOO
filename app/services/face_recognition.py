@@ -4,6 +4,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock, RLock
 from typing import Iterable
 
 import cv2
@@ -61,60 +62,65 @@ class FaceRecognitionService:
             str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
         )
         self.model: TrainedFaceModel | None = None
+        self._detector_lock = Lock()
+        self._model_lock = RLock()
 
     def load_if_available(self) -> bool:
-        if not self.model_path.exists() or not self.meta_path.exists():
-            return False
+        with self._model_lock:
+            if not self.model_path.exists() or not self.meta_path.exists():
+                return False
 
-        meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
-        backend = str(meta.get("backend", "simple_pca"))
-        preferred_backend = self._preferred_backend()
-        if backend != preferred_backend:
-            return False
+            meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
+            backend = str(meta.get("backend", "simple_pca"))
+            preferred_backend = self._preferred_backend()
+            if backend != preferred_backend:
+                return False
 
-        data = np.load(self.model_path)
-        if backend == "sface":
+            data = np.load(self.model_path)
+            if backend == "sface":
+                self.model = TrainedFaceModel(
+                    labels=[str(item) for item in data["labels"].tolist()],
+                    embeddings=data["embeddings"].astype(np.float32),
+                    quality_scores=(
+                        data["quality_scores"].astype(np.float32)
+                        if "quality_scores" in data.files
+                        else None
+                    ),
+                    threshold=float(meta["threshold"]),
+                    backend="sface",
+                    model_version=str(meta.get("model_version", MODEL_VERSION)),
+                )
+                return True
+
             self.model = TrainedFaceModel(
                 labels=[str(item) for item in data["labels"].tolist()],
-                embeddings=data["embeddings"].astype(np.float32),
-                quality_scores=(
-                    data["quality_scores"].astype(np.float32)
-                    if "quality_scores" in data.files
-                    else None
-                ),
+                mean=data["mean"].astype(np.float32),
+                components=data["components"].astype(np.float32),
+                centroids=data["centroids"].astype(np.float32),
                 threshold=float(meta["threshold"]),
-                backend="sface",
-                model_version=str(meta.get("model_version", MODEL_VERSION)),
+                backend=str(meta.get("backend", "simple_pca")),
             )
             return True
-
-        self.model = TrainedFaceModel(
-            labels=[str(item) for item in data["labels"].tolist()],
-            mean=data["mean"].astype(np.float32),
-            components=data["components"].astype(np.float32),
-            centroids=data["centroids"].astype(np.float32),
-            threshold=float(meta["threshold"]),
-            backend=str(meta.get("backend", "simple_pca")),
-        )
-        return True
 
     def ensure_model(self) -> bool:
-        preferred_backend = self._preferred_backend()
-        if self.model is not None and self.model.backend == preferred_backend:
-            return True
-        if self.load_if_available():
-            return True
-        return self.retrain_from_disk().get("samples", 0) > 0
+        with self._model_lock:
+            preferred_backend = self._preferred_backend()
+            if self.model is not None and self.model.backend == preferred_backend:
+                return True
+            if self.load_if_available():
+                return True
+            return self.retrain_from_disk().get("samples", 0) > 0
 
     def retrain_from_disk(self) -> dict[str, object]:
-        if self._preferred_backend() == "sface":
-            report = self._retrain_sface_from_disk()
-            if report.get("samples", 0) > 0:
-                return report
-            self.logger.warning(
-                "SFace retraining produced no usable samples, falling back to simple_pca."
-            )
-        return self._retrain_simple_pca_from_disk()
+        with self._model_lock:
+            if self._preferred_backend() == "sface":
+                report = self._retrain_sface_from_disk()
+                if report.get("samples", 0) > 0:
+                    return report
+                self.logger.warning(
+                    "SFace retraining produced no usable samples, falling back to simple_pca."
+                )
+            return self._retrain_simple_pca_from_disk()
 
     def register_user_images(self, user_id: str, images: Iterable[tuple[str, bytes]]) -> dict[str, object]:
         saved = 0
@@ -200,21 +206,22 @@ class FaceRecognitionService:
         return self._predict_simple_pca(image_bytes, device_id=device_id)
 
     def get_status(self) -> dict[str, object]:
-        if self.model is None and not self.load_if_available():
-            return {
-                "loaded": False,
-                "backend": self._preferred_backend(),
-                "known_users": [],
-                "threshold": self.settings.face_match_threshold,
-            }
+        with self._model_lock:
+            if self.model is None and not self.load_if_available():
+                return {
+                    "loaded": False,
+                    "backend": self._preferred_backend(),
+                    "known_users": [],
+                    "threshold": self.settings.face_match_threshold,
+                }
 
-        assert self.model is not None
-        return {
-            "loaded": True,
-            "backend": self.model.backend,
-            "known_users": sorted(set(self.model.labels)),
-            "threshold": self.model.threshold,
-        }
+            assert self.model is not None
+            return {
+                "loaded": True,
+                "backend": self.model.backend,
+                "known_users": sorted(set(self.model.labels)),
+                "threshold": self.model.threshold,
+            }
 
     def _predict_sface(self, image_bytes: bytes, device_id: int | None = None) -> FacePrediction:
         assert self.model is not None
@@ -423,11 +430,12 @@ class FaceRecognitionService:
         }
 
     def _clear_model_files(self) -> None:
-        self.model = None
-        if self.model_path.exists():
-            self.model_path.unlink(missing_ok=True)
-        if self.meta_path.exists():
-            self.meta_path.unlink(missing_ok=True)
+        with self._model_lock:
+            self.model = None
+            if self.model_path.exists():
+                self.model_path.unlink(missing_ok=True)
+            if self.meta_path.exists():
+                self.meta_path.unlink(missing_ok=True)
 
     def _preferred_backend(self) -> str:
         if self.settings.face_backend == "sface" and self._supports_sface():
@@ -474,12 +482,23 @@ class FaceRecognitionService:
         if self.detector.empty():
             return None
 
-        faces = self.detector.detectMultiScale(
-            gray,
-            scaleFactor=1.05 if relax else 1.08,
-            minNeighbors=4 if relax else 6,
-            minSize=(28, 28) if relax else (40, 40),
-        )
+        if gray.ndim != 2:
+            return None
+        if gray.shape[0] < 32 or gray.shape[1] < 32:
+            return None
+
+        try:
+            with self._detector_lock:
+                faces = self.detector.detectMultiScale(
+                    gray,
+                    scaleFactor=1.05 if relax else 1.08,
+                    minNeighbors=4 if relax else 6,
+                    minSize=(28, 28) if relax else (40, 40),
+                )
+        except cv2.error as exc:
+            self.logger.warning("OpenCV Haar face detection failed: %s", exc)
+            return None
+
         if len(faces) == 0:
             return None
 
